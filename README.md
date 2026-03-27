@@ -17,7 +17,7 @@ Este repositorio reúne la **memoria técnica y la trazabilidad computacional** 
 - **`resultados/`**: carpeta destinada a almacenar salidas y resultados de fases analíticas posteriores.
 - **`anexos/`**: documentación complementaria vinculada al TFM.
 
-## 🧭 Alcance de esta versión
+## 🧭 Alcance
 
 La presente versión del repositorio documenta y almacena los siguientes materiales desarrollados del TFM:
 
