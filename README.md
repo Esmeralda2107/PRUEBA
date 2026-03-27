@@ -74,7 +74,7 @@ La implementación SQL del proyecto se encuentra en la carpeta **`sql/`** y se a
 
 La carpeta **`sql/`** incluye además el archivo **`Modelo Relacion - Entidad.mwb`**, editable en MySQL Workbench.
 
-## 🔗 Relación entre carpetas del proyecto
+Como apoyo complementario, en la carpeta **`anexos/`** se incluye el archivo **`esquema_modelo_logico_tfm.pdf`**, que presenta una representación visual del desarrollo del modelo lógico del sistema.
 
 La trazabilidad general del repositorio sigue esta secuencia:
 
