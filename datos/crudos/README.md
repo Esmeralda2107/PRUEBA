@@ -11,6 +11,8 @@ Las fuentes crudas se organizan por dimensión temática:
 - **`lugares_interes/`**: base original de equipamientos y puntos de interés urbanos relevantes para el análisis espacial.
 - **`zonas/`**: cartografía base en formato **GeoJSON** con las unidades territoriales de Manhattan empleadas para la integración espacial del resto de fuentes.
 
+Los archivos contenidos en este directorio constituyen las **entradas de los notebooks de limpieza** desarrollados en Python y organizados en la carpeta **`notebooks/01_limpieza/`** del repositorio.
+
 Esta carpeta representa la **primera capa de datos del proyecto**. A partir de estos archivos se desarrollan las etapas posteriores de:
 
 - limpieza y depuración,
