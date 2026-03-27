@@ -114,4 +114,6 @@ La base de datos implementa un **modelo estrella**, en el que **`ZONAS`** funcio
 
 Este diseño permite integrar información territorial de distintas dimensiones en una estructura relacional común, facilitando la consulta consistente de los datos por zona, la validación de relaciones entre tablas y su explotación analítica posterior.
 
+Como apoyo complementario, la carpeta **`anexos/`** incluye el archivo **`esquema_modelo_logico_tfm.pdf`**, que presenta una representación visual del desarrollo del modelo lógico del sistema.
+
 En conjunto, esta carpeta documenta la capa SQL del proyecto y sirve como soporte técnico para la implementación local del modelo de datos desarrollado en el TFM.
