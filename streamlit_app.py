@@ -288,6 +288,57 @@ def score_icon(score):
     return "🔴"
 
 
+def business_interpretation(dim_key, score):
+    level = classify_level(score)
+
+    labels = {
+        "DEMANDA": {
+            "Muy alto": "potencial de demanda muy alto",
+            "Alto": "potencial de demanda alto",
+            "Medio": "potencial de demanda medio",
+            "Bajo": "potencial de demanda bajo",
+            "Muy bajo": "potencial de demanda muy bajo",
+        },
+        "MOVILIDAD": {
+            "Muy alto": "movilidad y conectividad muy altas",
+            "Alto": "movilidad y conectividad altas",
+            "Medio": "movilidad y conectividad medias",
+            "Bajo": "movilidad y conectividad bajas",
+            "Muy bajo": "movilidad y conectividad muy bajas",
+        },
+        "SEGURIDAD": {
+            "Muy alto": "zona muy segura",
+            "Alto": "zona segura",
+            "Medio": "zona con seguridad media",
+            "Bajo": "zona con seguridad baja",
+            "Muy bajo": "zona más expuesta en seguridad",
+        },
+        "PUNTOS_INTERES": {
+            "Muy alto": "capacidad de atracción muy alta",
+            "Alto": "capacidad de atracción alta",
+            "Medio": "capacidad de atracción media",
+            "Bajo": "capacidad de atracción baja",
+            "Muy bajo": "capacidad de atracción muy baja",
+        },
+        "COMPETENCIA": {
+            "Muy alto": "entorno competitivo muy favorable",
+            "Alto": "entorno competitivo favorable",
+            "Medio": "entorno competitivo intermedio",
+            "Bajo": "entorno competitivo poco favorable",
+            "Muy bajo": "entorno competitivo muy exigente",
+        },
+        "COSTE": {
+            "Muy alto": "coste de alquiler muy competitivo",
+            "Alto": "coste de alquiler competitivo",
+            "Medio": "coste de alquiler medio",
+            "Bajo": "coste de alquiler elevado",
+            "Muy bajo": "coste de alquiler muy elevado",
+        },
+    }
+
+    return labels[dim_key][level]
+
+
 def detect_geojson_id_field(geojson_dict):
     features = geojson_dict.get("features", [])
     if not features:
@@ -435,6 +486,7 @@ def get_top_subdimensions(row, top_n=3):
                     "dimension": dim_meta["label"],
                     "score": row[f"SCORE_VAR_{var}"],
                     "contrib": row[f"CONTRIB_SCEN_VAR_{var}"],
+                    "var": var,
                 }
             )
     items = sorted(items, key=lambda x: x["contrib"], reverse=True)
@@ -445,7 +497,6 @@ def get_dimension_summary(row):
     summaries = []
     for dim_key, dim_meta in DIMENSIONS.items():
         dim_score = row[f"SCORE_DIM_{dim_key}"]
-        level = classify_level(dim_score)
 
         best_label = None
         best_contrib = -1
@@ -457,9 +508,11 @@ def get_dimension_summary(row):
 
         summaries.append(
             {
+                "dim_key": dim_key,
                 "dimension": dim_meta["label"],
                 "score": dim_score,
-                "level": level,
+                "level": classify_level(dim_score),
+                "business": business_interpretation(dim_key, dim_score),
                 "best_subdim": best_label,
             }
         )
@@ -533,9 +586,18 @@ def build_grouped_dimensions(df):
 
     out["Rank"] = out["Rank"].apply(fmt_int)
 
+    dim_key_map = {
+        "Demanda": "DEMANDA",
+        "Movilidad": "MOVILIDAD",
+        "Seguridad": "SEGURIDAD",
+        "Puntos de interés": "PUNTOS_INTERES",
+        "Competencia": "COMPETENCIA",
+        "Coste": "COSTE",
+    }
+
     for col in ["Demanda", "Movilidad", "Seguridad", "Puntos de interés", "Competencia", "Coste"]:
         out[col] = out[col].apply(
-            lambda x: f"{score_icon(float(x))} {classify_level(float(x))} | {fmt_num(float(x), 1)}"
+            lambda x, c=col: f"{score_icon(float(x))} {business_interpretation(dim_key_map[c], float(x)).capitalize()} | {fmt_num(float(x), 1)}"
         )
 
     return out
@@ -597,6 +659,79 @@ def allocate_remaining(selected_dim, selected_value, dims, total, min_each, base
     final_weights[last_key] += diff
 
     return final_weights
+
+
+def demand_detail_text(row):
+    demand_vars = [
+        ("POBLACION_KM2", "densidad poblacional"),
+        ("PORCENTAJE_HISPANOS", "población hispana"),
+        ("INGRESO_MEDIANO_HOGAR", "ingreso mediano del hogar"),
+        ("TAMANO_HOGAR_PROMEDIO", "tamaño de hogar"),
+        ("EDAD_MEDIANA", "edad mediana"),
+    ]
+    items = []
+    for var, label in demand_vars:
+        score = row[f"SCORE_VAR_{var}"]
+        items.append((label, score))
+    items = sorted(items, key=lambda x: x[1], reverse=True)[:2]
+    return f"Destacan {items[0][0]} ({classify_level(items[0][1]).lower()}) y {items[1][0]} ({classify_level(items[1][1]).lower()})."
+
+
+def mobility_detail_text(row):
+    mov = row["SCORE_VAR_MOVILIDAD_PROMEDIO_DIARIA"]
+    est = row["SCORE_VAR_MOV_CANTIDAD_ESTACIONES"]
+    return f"Movilidad promedio diaria {classify_level(mov).lower()} y cantidad de estaciones {classify_level(est).lower()}."
+
+
+def security_detail_text(row):
+    prop = row["SCORE_VAR_DELITO_PROPIEDAD_KM2"]
+    trans = row["SCORE_VAR_DELITO_TRANSPORTE_KM2"]
+    otros = row["SCORE_VAR_DELITO_OTROS_KM2"]
+    best = max([
+        ("delito propiedad", prop),
+        ("delito transporte", trans),
+        ("otros delitos", otros),
+    ], key=lambda x: x[1])
+    return f"Mejor desempeño relativo en {best[0]} ({classify_level(best[1]).lower()} dentro del scoring de seguridad)."
+
+
+def poi_detail_text(row):
+    com = row["SCORE_VAR_LUGARES_COMERCIO_KM2"]
+    ofi = row["SCORE_VAR_LUGARES_OFICINAS_KM2"]
+    res = row["SCORE_VAR_LUGARES_RESIDENCIAL_KM2"]
+    best = max([
+        ("actividad comercial", com),
+        ("oficinas", ofi),
+        ("entorno residencial", res),
+    ], key=lambda x: x[1])
+    return f"El principal apoyo proviene de {best[0]} ({classify_level(best[1]).lower()})."
+
+
+def competition_detail_text(row):
+    direct = row["SCORE_VAR_COMPETENCIA_DIRECTA_KM2"]
+    indirect = row["SCORE_VAR_COMPETENCIA_INDIRECTA_KM2"]
+    return f"Competencia directa {classify_level(direct).lower()} e indirecta {classify_level(indirect).lower()} dentro del scoring competitivo."
+
+
+def cost_detail_text(row):
+    c = row["SCORE_VAR_ALQ_PRECIO_PIE2_ANUAL"]
+    return f"El alquiler se sitúa en un nivel {classify_level(c).lower()} dentro del scoring de coste."
+
+
+def dimension_detail_text(row, dim_key):
+    if dim_key == "DEMANDA":
+        return demand_detail_text(row)
+    if dim_key == "MOVILIDAD":
+        return mobility_detail_text(row)
+    if dim_key == "SEGURIDAD":
+        return security_detail_text(row)
+    if dim_key == "PUNTOS_INTERES":
+        return poi_detail_text(row)
+    if dim_key == "COMPETENCIA":
+        return competition_detail_text(row)
+    if dim_key == "COSTE":
+        return cost_detail_text(row)
+    return ""
 
 
 # =========================================================
@@ -933,9 +1068,9 @@ with tab1:
     dimension_summary = get_dimension_summary(best_zone)
     summary_lines = []
     for item in dimension_summary:
+        detail = dimension_detail_text(best_zone, item["dim_key"])
         summary_lines.append(
-            f"- **{item['dimension']}**: {classify_level(item['score'])} ({item['score']:.1f}/100). "
-            f"Subdimensión más representativa: **{item['best_subdim']}**."
+            f"- **{item['dimension']}**: {item['business'].capitalize()} ({item['score']:.1f}/100). {detail}"
         )
 
     st.markdown('<div class="summary-box">', unsafe_allow_html=True)
@@ -1125,7 +1260,8 @@ with tab4:
 - **Muy bajo**: 0 a 19.99
 
 Estas categorías se aplican sobre la **puntuación transformada (0–100)** y no sobre el valor bruto de la variable.  
-Por eso, una variable de **sentido inverso** puede tener un valor bruto alto y aun así recibir una puntuación baja. En consecuencia, una categoría alta indica mejor desempeño **dentro del modelo de scoring**, no necesariamente un valor bruto alto en el dato original.
+Por eso, una variable o dimensión con categoría alta significa **mejor desempeño dentro del modelo de scoring**, no necesariamente un valor bruto alto en el dato original.  
+Por ejemplo, en **Coste** una puntuación alta indica alquiler relativamente más económico, y en **Seguridad** una puntuación alta indica una zona relativamente más segura.
 
 **Dimensiones**
 - Censo (Demanda)
