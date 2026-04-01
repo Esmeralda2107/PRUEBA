@@ -4,7 +4,6 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 from sklearn.cluster import KMeans
-from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
 
@@ -113,7 +112,7 @@ DIMENSIONS = {
     "MOVILIDAD": {
         "label": "Movilidad",
         "variables": {
-            "MOVILIDAD_PROMEDIO_DIARIA": {"label": "Movilidad", "weight": 70, "sense": "direct"},
+            "MOVILIDAD_PROMEDIO_DIARIA": {"label": "Movilidad promedio diaria", "weight": 70, "sense": "direct"},
             "MOV_CANTIDAD_ESTACIONES": {"label": "Cantidad de estaciones", "weight": 30, "sense": "direct"},
         },
     },
@@ -150,10 +149,7 @@ DIMENSIONS = {
 
 SCENARIOS = {
     "Potencial de demanda": {
-        "description": (
-            "Prioriza las dimensiones más vinculadas con la capacidad de atracción comercial de la zona. "
-            "Este escenario enfatiza aquellas condiciones que permiten captar demanda y reforzar el potencial de consumo del entorno."
-        ),
+        "description": "Prioriza las dimensiones más vinculadas con la capacidad de atracción comercial de la zona.",
         "weights": {
             "DEMANDA": 35,
             "PUNTOS_INTERES": 35,
@@ -166,10 +162,7 @@ SCENARIOS = {
         "context_dims": ["MOVILIDAD", "SEGURIDAD", "COSTE", "COMPETENCIA"],
     },
     "Eficiencia y flujo": {
-        "description": (
-            "Da mayor peso a las condiciones urbanas más relevantes para un modelo fast casual orientado al take-away. "
-            "Se concentra en el funcionamiento dinámico del entorno y en su capacidad de sostener flujo y actividad."
-        ),
+        "description": "Da mayor peso a las condiciones urbanas más relevantes para un modelo fast casual orientado al take-away.",
         "weights": {
             "MOVILIDAD": 40,
             "PUNTOS_INTERES": 30,
@@ -182,10 +175,7 @@ SCENARIOS = {
         "context_dims": ["DEMANDA", "SEGURIDAD", "COSTE", "COMPETENCIA"],
     },
     "Viabilidad y riesgo": {
-        "description": (
-            "Enfatiza los factores que inciden con mayor fuerza en la estabilidad operativa y económica de la implantación, "
-            "así como en la saturación competitiva del entorno."
-        ),
+        "description": "Enfatiza los factores que inciden con mayor fuerza en la estabilidad operativa y económica de la implantación, así como en la saturación competitiva del entorno.",
         "weights": {
             "SEGURIDAD": 25,
             "COSTE": 25,
@@ -270,7 +260,16 @@ def classify_level(score):
         return "Alto"
     if score < 34:
         return "Bajo"
-    return "Neutro"
+    return "Medio"
+
+
+def score_icon(score):
+    level = classify_level(score)
+    if level == "Alto":
+        return "🟢"
+    if level == "Bajo":
+        return "🔴"
+    return "🟡"
 
 
 def detect_geojson_id_field(geojson_dict):
@@ -378,10 +377,7 @@ def compute_clusters(df, feature_cols):
     km = KMeans(n_clusters=4, random_state=42, n_init=10)
     clusters = km.fit_predict(x_scaled)
 
-    pca = PCA(n_components=2, random_state=42)
-    coords = pca.fit_transform(x_scaled)
-
-    return clusters, coords[:, 0], coords[:, 1]
+    return clusters
 
 
 def build_cluster_names(df):
@@ -472,13 +468,16 @@ def render_html_table(df):
 
 
 def build_grouped_context(df, scenario_name):
-    out = df[["RANK", "ID_ZONA", "NOMBRE_ZONA", "CLUSTER_FILTER", "SCORE_ESCENARIO"]].head(10).copy()
+    out = df[[
+        "RANK", "ID_ZONA", "NOMBRE_ZONA", "CLUSTER_FILTER", "CLUSTER_DESC", "SCORE_ESCENARIO"
+    ]].head(10).copy()
     out["ESCENARIO"] = scenario_name
     out = out.rename(columns={
         "RANK": "Rank",
         "ID_ZONA": "ID zona",
         "NOMBRE_ZONA": "Zona",
         "CLUSTER_FILTER": "Cluster",
+        "CLUSTER_DESC": "Nombre del cluster",
         "SCORE_ESCENARIO": "Score escenario",
         "ESCENARIO": "Escenario",
     })
@@ -512,30 +511,32 @@ def build_grouped_dimensions(df):
     })
 
     out["Rank"] = out["Rank"].apply(fmt_int)
+
     for col in ["Demanda", "Movilidad", "Seguridad", "Puntos de interés", "Competencia", "Coste"]:
-        out[col] = out[col].apply(lambda x: fmt_num(x, 2))
+        out[col] = out[col].apply(
+            lambda x: f"{score_icon(float(x))} {classify_level(float(x))} | {fmt_num(float(x), 1)}"
+        )
 
     return out
 
 
 def build_grouped_subdimensions(df):
-    cols = ["RANK", "NOMBRE_ZONA"]
-    rename_map = {"RANK": "Rank", "NOMBRE_ZONA": "Zona"}
+    data_cols = []
+    col_tuples = [("", "Rank"), ("", "Zona")]
 
-    for dim_meta in DIMENSIONS.values():
+    for dim_key, dim_meta in DIMENSIONS.items():
         for var, var_meta in dim_meta["variables"].items():
-            cols.append(var)
-            rename_map[var] = var_meta["label"]
+            data_cols.append(var)
+            col_tuples.append((dim_meta["label"], var_meta["label"]))
 
-    out = df[cols].head(10).copy().rename(columns=rename_map)
+    base = df[["RANK", "NOMBRE_ZONA"] + data_cols].head(10).copy()
+    base["RANK"] = base["RANK"].apply(fmt_int)
 
-    out["Rank"] = out["Rank"].apply(fmt_int)
+    for col in data_cols:
+        base[col] = base[col].apply(lambda x: fmt_num(x, 2))
 
-    for col in out.columns:
-        if col not in ["Rank", "Zona"]:
-            out[col] = out[col].apply(lambda x: fmt_num(x, 2))
-
-    return out
+    base.columns = pd.MultiIndex.from_tuples([("", "Rank"), ("", "Zona")] + col_tuples[2:])
+    return base
 
 
 def allocate_remaining(selected_dim, selected_value, dims, total, min_each, base_weights):
@@ -611,10 +612,8 @@ for dim_meta in DIMENSIONS.values():
 
 df = compute_dimension_scores(df)
 
-clusters, pca1, pca2 = compute_clusters(df, all_feature_cols)
+clusters = compute_clusters(df, all_feature_cols)
 df["CLUSTER_K4"] = (clusters + 1).astype(int)
-df["PCA_1"] = pca1
-df["PCA_2"] = pca2
 
 cluster_names = build_cluster_names(df)
 df["CLUSTER_DESC"] = df["CLUSTER_K4"].map(cluster_names)
@@ -649,9 +648,7 @@ st.sidebar.caption(
     "Puedes modificar una dimensión dentro de cada bloque, y la aplicación reajusta automáticamente las demás para conservar esa lógica."
 )
 
-# -----------------------------
 # PRINCIPALES
-# -----------------------------
 st.sidebar.markdown("**Dimensiones principales**")
 main_dims = scenario["main_dims"]
 main_defaults = {d: scenario["weights"][d] for d in main_dims}
@@ -688,9 +685,7 @@ for d in main_dims:
     if d != main_selected:
         st.sidebar.info(f"{DIMENSIONS[d]['label']}: {main_weights[d]}% (ajuste automático)")
 
-# -----------------------------
 # CONTEXTO
-# -----------------------------
 st.sidebar.markdown("**Dimensiones de contexto**")
 context_dims = scenario["context_dims"]
 context_defaults = {d: scenario["weights"][d] for d in context_dims}
@@ -732,9 +727,7 @@ for d in context_dims:
 effective_weights = {**main_weights, **context_weights}
 scenario_scored = compute_scenario_scores(df, effective_weights)
 
-# -----------------------------
 # FILTROS
-# -----------------------------
 st.sidebar.markdown("### Filtros")
 
 score_range = st.sidebar.slider(
@@ -877,7 +870,7 @@ with tab1:
 
     map_df = filtered.copy()
     map_df["ID_ZONA"] = map_df["ID_ZONA"].apply(clean_zone_id)
-    map_df = map_df[map_df["ID_ZONA"].isin(geojson_ids)].copy()
+    map_df = map_df[map_df["ID_ZONA"].isin(geojson_id_set)].copy()
 
     if map_df.empty:
         st.error("No hay coincidencias entre los IDs filtrados y el GeoJSON.")
@@ -983,20 +976,43 @@ with tab3:
     col_a, col_b = st.columns(2)
 
     with col_a:
-        fig_cluster = px.scatter(
-            filtered,
-            x="PCA_1",
-            y="PCA_2",
-            color="CLUSTER_FILTER",
-            size="SCORE_ESCENARIO",
-            hover_name="NOMBRE_ZONA",
-            hover_data={"CLUSTER_DESC": True},
-            title="Clusters K-means k=4",
-            labels={
-                "PCA_1": "Componente 1 del clustering",
-                "PCA_2": "Componente 2 del clustering",
-                "CLUSTER_FILTER": "Cluster",
-            }
+        cluster_dim = (
+            filtered.groupby(["CLUSTER_FILTER", "CLUSTER_DESC"], as_index=False)[[
+                "SCORE_DIM_DEMANDA",
+                "SCORE_DIM_MOVILIDAD",
+                "SCORE_DIM_SEGURIDAD",
+                "SCORE_DIM_PUNTOS_INTERES",
+                "SCORE_DIM_COMPETENCIA",
+                "SCORE_DIM_COSTE",
+            ]]
+            .mean()
+        )
+
+        heat = cluster_dim.melt(
+            id_vars=["CLUSTER_FILTER", "CLUSTER_DESC"],
+            var_name="Dimensión",
+            value_name="Puntuación promedio",
+        )
+
+        heat["Dimensión"] = heat["Dimensión"].replace({
+            "SCORE_DIM_DEMANDA": "Demanda",
+            "SCORE_DIM_MOVILIDAD": "Movilidad",
+            "SCORE_DIM_SEGURIDAD": "Seguridad",
+            "SCORE_DIM_PUNTOS_INTERES": "Puntos de interés",
+            "SCORE_DIM_COMPETENCIA": "Competencia",
+            "SCORE_DIM_COSTE": "Coste",
+        })
+
+        heat["Cluster"] = heat["CLUSTER_FILTER"] + " — " + heat["CLUSTER_DESC"]
+
+        fig_cluster = px.density_heatmap(
+            heat,
+            x="Dimensión",
+            y="Cluster",
+            z="Puntuación promedio",
+            text_auto=".1f",
+            color_continuous_scale="Tealgrn",
+            title="Perfil promedio por dimensiones de cada cluster",
         )
         fig_cluster.update_layout(height=460, margin=dict(l=0, r=0, t=50, b=0))
         st.plotly_chart(fig_cluster, use_container_width=True)
@@ -1072,8 +1088,8 @@ with tab4:
 - Escala final: 0 a 100 puntos.
 
 **Sentido de las variables**
-- **Sentido directo**: valores altos representan una condición más favorable para el negocio.
-- **Sentido inverso**: valores altos representan una condición menos favorable, por lo que reciben menor puntuación.
+- **Sentido directo**: valores altos representan una condición favorable para el negocio, por lo que reciben puntuaciones más altas.
+- **Sentido inverso**: valores altos representan una condición desfavorable para el negocio, por lo que reciben puntuaciones más bajas.
 
 **Regla macro**
 - Dimensiones principales: **70 %**
@@ -1117,12 +1133,13 @@ with tab4:
         with st.expander(f"{row['CLUSTER_FILTER']} — {row['CLUSTER_DESC']} | {len(row['NOMBRE_ZONA'])} zonas"):
             st.write(", ".join(row["NOMBRE_ZONA"]))
 
-    st.markdown("### Lectura del gráfico de clustering")
+    st.markdown("### Lectura del gráfico de clusters")
     st.markdown(
         """
-- **Componente 1 del clustering** y **Componente 2 del clustering** son ejes sintéticos obtenidos mediante PCA.
-- Su función es visualizar en dos dimensiones la proximidad entre zonas.
-- No representan una variable única del dataset, sino una combinación de variables utilizadas para facilitar la lectura del agrupamiento.
+- El gráfico muestra el **perfil promedio por dimensiones de cada cluster**.
+- Cada fila representa un cluster y cada columna una dimensión.
+- El valor y el color indican la puntuación media de ese cluster en esa dimensión.
+- Su objetivo es facilitar una lectura más interpretable del agrupamiento territorial.
 """
     )
 
