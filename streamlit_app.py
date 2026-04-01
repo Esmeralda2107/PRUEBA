@@ -265,78 +265,38 @@ def score_0_100(series: pd.Series, sense: str = "direct") -> pd.Series:
 
 def classify_level(score):
     if score >= 80:
-        return "Muy alto"
+        return "muy alta"
     if score >= 60:
-        return "Alto"
+        return "alta"
     if score >= 40:
-        return "Medio"
+        return "media"
     if score >= 20:
-        return "Bajo"
-    return "Muy bajo"
+        return "baja"
+    return "muy baja"
+
+
+def classify_level_plural(score):
+    if score >= 80:
+        return "muy altas"
+    if score >= 60:
+        return "altas"
+    if score >= 40:
+        return "medias"
+    if score >= 20:
+        return "bajas"
+    return "muy bajas"
 
 
 def score_icon(score):
-    level = classify_level(score)
-    if level == "Muy alto":
+    if score >= 80:
         return "🟢"
-    if level == "Alto":
+    if score >= 60:
         return "🟩"
-    if level == "Medio":
+    if score >= 40:
         return "🟡"
-    if level == "Bajo":
+    if score >= 20:
         return "🟠"
     return "🔴"
-
-
-def business_interpretation(dim_key, score):
-    level = classify_level(score)
-
-    labels = {
-        "DEMANDA": {
-            "Muy alto": "potencial de demanda muy alto",
-            "Alto": "potencial de demanda alto",
-            "Medio": "potencial de demanda medio",
-            "Bajo": "potencial de demanda bajo",
-            "Muy bajo": "potencial de demanda muy bajo",
-        },
-        "MOVILIDAD": {
-            "Muy alto": "movilidad y conectividad muy altas",
-            "Alto": "movilidad y conectividad altas",
-            "Medio": "movilidad y conectividad medias",
-            "Bajo": "movilidad y conectividad bajas",
-            "Muy bajo": "movilidad y conectividad muy bajas",
-        },
-        "SEGURIDAD": {
-            "Muy alto": "zona muy segura",
-            "Alto": "zona segura",
-            "Medio": "zona con seguridad media",
-            "Bajo": "zona con seguridad baja",
-            "Muy bajo": "zona más expuesta en seguridad",
-        },
-        "PUNTOS_INTERES": {
-            "Muy alto": "capacidad de atracción muy alta",
-            "Alto": "capacidad de atracción alta",
-            "Medio": "capacidad de atracción media",
-            "Bajo": "capacidad de atracción baja",
-            "Muy bajo": "capacidad de atracción muy baja",
-        },
-        "COMPETENCIA": {
-            "Muy alto": "entorno competitivo muy favorable",
-            "Alto": "entorno competitivo favorable",
-            "Medio": "entorno competitivo intermedio",
-            "Bajo": "entorno competitivo poco favorable",
-            "Muy bajo": "entorno competitivo muy exigente",
-        },
-        "COSTE": {
-            "Muy alto": "coste de alquiler muy competitivo",
-            "Alto": "coste de alquiler competitivo",
-            "Medio": "coste de alquiler medio",
-            "Bajo": "coste de alquiler elevado",
-            "Muy bajo": "coste de alquiler muy elevado",
-        },
-    }
-
-    return labels[dim_key][level]
 
 
 def detect_geojson_id_field(geojson_dict):
@@ -493,32 +453,6 @@ def get_top_subdimensions(row, top_n=3):
     return items[:top_n]
 
 
-def get_dimension_summary(row):
-    summaries = []
-    for dim_key, dim_meta in DIMENSIONS.items():
-        dim_score = row[f"SCORE_DIM_{dim_key}"]
-
-        best_label = None
-        best_contrib = -1
-        for var, var_meta in dim_meta["variables"].items():
-            contrib = row[f"CONTRIB_SCEN_VAR_{var}"]
-            if contrib > best_contrib:
-                best_contrib = contrib
-                best_label = var_meta["label"]
-
-        summaries.append(
-            {
-                "dim_key": dim_key,
-                "dimension": dim_meta["label"],
-                "score": dim_score,
-                "level": classify_level(dim_score),
-                "business": business_interpretation(dim_key, dim_score),
-                "best_subdim": best_label,
-            }
-        )
-    return summaries
-
-
 def fmt_num(x, decimals=2):
     if pd.isna(x):
         return ""
@@ -586,18 +520,9 @@ def build_grouped_dimensions(df):
 
     out["Rank"] = out["Rank"].apply(fmt_int)
 
-    dim_key_map = {
-        "Demanda": "DEMANDA",
-        "Movilidad": "MOVILIDAD",
-        "Seguridad": "SEGURIDAD",
-        "Puntos de interés": "PUNTOS_INTERES",
-        "Competencia": "COMPETENCIA",
-        "Coste": "COSTE",
-    }
-
     for col in ["Demanda", "Movilidad", "Seguridad", "Puntos de interés", "Competencia", "Coste"]:
         out[col] = out[col].apply(
-            lambda x, c=col: f"{score_icon(float(x))} {business_interpretation(dim_key_map[c], float(x)).capitalize()} | {fmt_num(float(x), 1)}"
+            lambda x: f"{score_icon(float(x))} puntuación {classify_level(float(x))} | {fmt_num(float(x), 1)}"
         )
 
     return out
@@ -661,77 +586,126 @@ def allocate_remaining(selected_dim, selected_value, dims, total, min_each, base
     return final_weights
 
 
-def demand_detail_text(row):
-    demand_vars = [
-        ("POBLACION_KM2", "densidad poblacional"),
-        ("PORCENTAJE_HISPANOS", "población hispana"),
-        ("INGRESO_MEDIANO_HOGAR", "ingreso mediano del hogar"),
-        ("TAMANO_HOGAR_PROMEDIO", "tamaño de hogar"),
-        ("EDAD_MEDIANA", "edad mediana"),
-    ]
+def top_vars_for_dimension(row, dim_key, n=2):
     items = []
-    for var, label in demand_vars:
-        score = row[f"SCORE_VAR_{var}"]
-        items.append((label, score))
-    items = sorted(items, key=lambda x: x[1], reverse=True)[:2]
-    return f"Destacan {items[0][0]} ({classify_level(items[0][1]).lower()}) y {items[1][0]} ({classify_level(items[1][1]).lower()})."
+    for var, var_meta in DIMENSIONS[dim_key]["variables"].items():
+        items.append(
+            {
+                "label": var_meta["label"],
+                "score": row[f"SCORE_VAR_{var}"],
+            }
+        )
+    items = sorted(items, key=lambda x: x["score"], reverse=True)
+    return items[:n]
 
 
-def mobility_detail_text(row):
+def demand_summary_text(row):
+    top_items = top_vars_for_dimension(row, "DEMANDA", n=2)
+    score1 = top_items[0]["score"]
+    score2 = top_items[1]["score"]
+    level1 = classify_level(score1)
+    level2 = classify_level(score2)
+
+    if level1 == level2:
+        return (
+            f"Destacan {top_items[0]['label'].lower()} y {top_items[1]['label'].lower()}, "
+            f"ambos con puntuación {level1}."
+        )
+
+    return (
+        f"Destacan {top_items[0]['label'].lower()} y {top_items[1]['label'].lower()}, "
+        f"con puntuaciones {level1} y {level2}, respectivamente."
+    )
+
+
+def mobility_summary_text(row):
     mov = row["SCORE_VAR_MOVILIDAD_PROMEDIO_DIARIA"]
     est = row["SCORE_VAR_MOV_CANTIDAD_ESTACIONES"]
-    return f"Movilidad promedio diaria {classify_level(mov).lower()} y cantidad de estaciones {classify_level(est).lower()}."
+    level_mov = classify_level(mov)
+    level_est = classify_level(est)
+
+    if level_mov == level_est:
+        return (
+            f"La movilidad promedio diaria y la cantidad de estaciones presentan "
+            f"puntuaciones {classify_level_plural((mov + est) / 2)} dentro de esta dimensión."
+        )
+
+    return (
+        f"La movilidad promedio diaria presenta una puntuación {level_mov}, "
+        f"mientras que la cantidad de estaciones muestra una puntuación {level_est} dentro de esta dimensión."
+    )
 
 
-def security_detail_text(row):
-    prop = row["SCORE_VAR_DELITO_PROPIEDAD_KM2"]
-    trans = row["SCORE_VAR_DELITO_TRANSPORTE_KM2"]
-    otros = row["SCORE_VAR_DELITO_OTROS_KM2"]
-    best = max([
-        ("delito propiedad", prop),
-        ("delito transporte", trans),
-        ("otros delitos", otros),
-    ], key=lambda x: x[1])
-    return f"Mejor desempeño relativo en {best[0]} ({classify_level(best[1]).lower()} dentro del scoring de seguridad)."
+def security_summary_text(row):
+    dim_score = row["SCORE_DIM_SEGURIDAD"]
+    top_item = top_vars_for_dimension(row, "SEGURIDAD", n=1)[0]
+    return (
+        f"Lo que indica una menor exposición relativa al riesgo dentro del conjunto analizado. "
+        f"El mejor desempeño relativo se observa en {top_item['label'].lower()}."
+    )
 
 
-def poi_detail_text(row):
-    com = row["SCORE_VAR_LUGARES_COMERCIO_KM2"]
-    ofi = row["SCORE_VAR_LUGARES_OFICINAS_KM2"]
-    res = row["SCORE_VAR_LUGARES_RESIDENCIAL_KM2"]
-    best = max([
-        ("actividad comercial", com),
-        ("oficinas", ofi),
-        ("entorno residencial", res),
-    ], key=lambda x: x[1])
-    return f"El principal apoyo proviene de {best[0]} ({classify_level(best[1]).lower()})."
+def poi_summary_text(row):
+    top_item = top_vars_for_dimension(row, "PUNTOS_INTERES", n=1)[0]
+    return (
+        f"El principal aporte dentro de la dimensión proviene de {top_item['label'].lower()}, "
+        f"con puntuación {classify_level(top_item['score'])}."
+    )
 
 
-def competition_detail_text(row):
+def competition_summary_text(row):
     direct = row["SCORE_VAR_COMPETENCIA_DIRECTA_KM2"]
     indirect = row["SCORE_VAR_COMPETENCIA_INDIRECTA_KM2"]
-    return f"Competencia directa {classify_level(direct).lower()} e indirecta {classify_level(indirect).lower()} dentro del scoring competitivo."
+
+    better = "competencia indirecta" if indirect >= direct else "competencia directa"
+    worse = "competencia directa" if indirect >= direct else "competencia indirecta"
+
+    dim_score = row["SCORE_DIM_COMPETENCIA"]
+    level = classify_level(dim_score)
+
+    if dim_score >= 60:
+        intro = "Lo que indica una presión competitiva relativamente más moderada dentro del modelo."
+    elif dim_score >= 40:
+        intro = "Lo que indica una presión competitiva intermedia dentro del modelo."
+    else:
+        intro = "Lo que indica una presión competitiva relativamente más exigente dentro del modelo."
+
+    return (
+        f"{intro} La dimensión muestra mejor desempeño en {better} que en {worse}."
+    )
 
 
-def cost_detail_text(row):
-    c = row["SCORE_VAR_ALQ_PRECIO_PIE2_ANUAL"]
-    return f"El alquiler se sitúa en un nivel {classify_level(c).lower()} dentro del scoring de coste."
+def cost_summary_text(row):
+    score = row["SCORE_VAR_ALQ_PRECIO_PIE2_ANUAL"]
+
+    if score >= 60:
+        return "Lo que indica un nivel de alquiler relativamente más bajo dentro del conjunto analizado."
+    if score >= 40:
+        return "Lo que indica un nivel de alquiler intermedio dentro del conjunto analizado."
+    return "Lo que indica un nivel de alquiler relativamente más alto dentro del conjunto analizado."
 
 
-def dimension_detail_text(row, dim_key):
+def dimension_summary_line(row, dim_key):
+    dim_label = DIMENSIONS[dim_key]["label"]
+    dim_score = row[f"SCORE_DIM_{dim_key}"]
+    level = classify_level(dim_score)
+
     if dim_key == "DEMANDA":
-        return demand_detail_text(row)
-    if dim_key == "MOVILIDAD":
-        return mobility_detail_text(row)
-    if dim_key == "SEGURIDAD":
-        return security_detail_text(row)
-    if dim_key == "PUNTOS_INTERES":
-        return poi_detail_text(row)
-    if dim_key == "COMPETENCIA":
-        return competition_detail_text(row)
-    if dim_key == "COSTE":
-        return cost_detail_text(row)
-    return ""
+        detail = demand_summary_text(row)
+    elif dim_key == "MOVILIDAD":
+        detail = mobility_summary_text(row)
+    elif dim_key == "SEGURIDAD":
+        detail = security_summary_text(row)
+    elif dim_key == "PUNTOS_INTERES":
+        detail = poi_summary_text(row)
+    elif dim_key == "COMPETENCIA":
+        detail = competition_summary_text(row)
+    elif dim_key == "COSTE":
+        detail = cost_summary_text(row)
+    else:
+        detail = ""
+
+    return f"- **{dim_label}**: puntuación {level} ({dim_score:.1f}/100). {detail}"
 
 
 # =========================================================
@@ -804,7 +778,6 @@ st.sidebar.caption(
     "Puedes modificar una dimensión dentro de cada bloque, y la aplicación reajusta automáticamente las demás para conservar esa lógica."
 )
 
-# PRINCIPALES
 st.sidebar.markdown("**Dimensiones principales**")
 main_dims = scenario["main_dims"]
 main_defaults = {d: scenario["weights"][d] for d in main_dims}
@@ -841,7 +814,6 @@ for d in main_dims:
     if d != main_selected:
         st.sidebar.info(f"{DIMENSIONS[d]['label']}: {main_weights[d]}% (ajuste automático)")
 
-# CONTEXTO
 st.sidebar.markdown("**Dimensiones de contexto**")
 context_dims = scenario["context_dims"]
 context_defaults = {d: scenario["weights"][d] for d in context_dims}
@@ -883,7 +855,6 @@ for d in context_dims:
 effective_weights = {**main_weights, **context_weights}
 scenario_scored = compute_scenario_scores(df, effective_weights)
 
-# FILTROS
 st.sidebar.markdown("### Filtros")
 
 score_range = st.sidebar.slider(
@@ -1065,13 +1036,14 @@ with tab1:
 
     st.plotly_chart(fig_map, use_container_width=True)
 
-    dimension_summary = get_dimension_summary(best_zone)
-    summary_lines = []
-    for item in dimension_summary:
-        detail = dimension_detail_text(best_zone, item["dim_key"])
-        summary_lines.append(
-            f"- **{item['dimension']}**: {item['business'].capitalize()} ({item['score']:.1f}/100). {detail}"
-        )
+    summary_lines = [
+        dimension_summary_line(best_zone, "DEMANDA"),
+        dimension_summary_line(best_zone, "MOVILIDAD"),
+        dimension_summary_line(best_zone, "SEGURIDAD"),
+        dimension_summary_line(best_zone, "PUNTOS_INTERES"),
+        dimension_summary_line(best_zone, "COMPETENCIA"),
+        dimension_summary_line(best_zone, "COSTE"),
+    ]
 
     st.markdown('<div class="summary-box">', unsafe_allow_html=True)
     st.markdown(f"### Descripción de la mejor zona: **{best_zone['NOMBRE_ZONA']}**")
@@ -1253,15 +1225,18 @@ with tab4:
 - La app permite modificar la dimensión elegida en cada bloque y reajusta automáticamente las demás para conservar la estructura.
 
 **Interpretación de categorías**
-- **Muy alto**: 80 a 100
-- **Alto**: 60 a 79.99
-- **Medio**: 40 a 59.99
-- **Bajo**: 20 a 39.99
-- **Muy bajo**: 0 a 19.99
+- **Muy alta**: 80 a 100
+- **Alta**: 60 a 79.99
+- **Media**: 40 a 59.99
+- **Baja**: 20 a 39.99
+- **Muy baja**: 0 a 19.99
 
 Estas categorías se aplican sobre la **puntuación transformada (0–100)** y no sobre el valor bruto de la variable.  
-Por eso, una variable o dimensión con categoría alta significa **mejor desempeño dentro del modelo de scoring**, no necesariamente un valor bruto alto en el dato original.  
-Por ejemplo, en **Coste** una puntuación alta indica alquiler relativamente más económico, y en **Seguridad** una puntuación alta indica una zona relativamente más segura.
+Por eso, una variable o dimensión con puntuación alta significa **mejor desempeño relativo dentro del modelo de scoring**, no necesariamente un valor bruto alto en el dato original.  
+En dimensiones de sentido inverso, una puntuación alta indica una condición relativamente más favorable dentro del conjunto analizado:
+- **Seguridad**: menor exposición relativa al riesgo.
+- **Coste**: menor nivel relativo de alquiler.
+- **Competencia**: menor presión competitiva relativa.
 
 **Dimensiones**
 - Censo (Demanda)
