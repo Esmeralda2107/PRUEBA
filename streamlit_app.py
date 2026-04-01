@@ -113,7 +113,7 @@ DIMENSIONS = {
     "MOVILIDAD": {
         "label": "Movilidad",
         "variables": {
-            "MOVILIDAD_PROMEDIO_DIARIA": {"label": "Flujo de personas (promedio diario)", "weight": 70, "sense": "direct"},
+            "MOVILIDAD_PROMEDIO_DIARIA": {"label": "Movilidad", "weight": 70, "sense": "direct"},
             "MOV_CANTIDAD_ESTACIONES": {"label": "Cantidad de estaciones", "weight": 30, "sense": "direct"},
         },
     },
@@ -152,8 +152,7 @@ SCENARIOS = {
     "Potencial de demanda": {
         "description": (
             "Prioriza las dimensiones más vinculadas con la capacidad de atracción comercial de la zona. "
-            "Bajo esta lógica, el 70 % del peso total se concentra en Censo (Demanda) y Puntos de interés, "
-            "mientras que el 30 % restante se reparte entre Movilidad, Seguridad, Coste y Competencia como factores de contexto."
+            "Este escenario enfatiza aquellas condiciones que permiten captar demanda y reforzar el potencial de consumo del entorno."
         ),
         "weights": {
             "DEMANDA": 35,
@@ -169,8 +168,7 @@ SCENARIOS = {
     "Eficiencia y flujo": {
         "description": (
             "Da mayor peso a las condiciones urbanas más relevantes para un modelo fast casual orientado al take-away. "
-            "En este escenario, el 70 % se concentra en Movilidad y Puntos de interés, "
-            "mientras que el 30 % restante se distribuye entre Censo (Demanda), Seguridad, Coste y Competencia."
+            "Se concentra en el funcionamiento dinámico del entorno y en su capacidad de sostener flujo y actividad."
         ),
         "weights": {
             "MOVILIDAD": 40,
@@ -186,8 +184,7 @@ SCENARIOS = {
     "Viabilidad y riesgo": {
         "description": (
             "Enfatiza los factores que inciden con mayor fuerza en la estabilidad operativa y económica de la implantación, "
-            "así como en la saturación competitiva del entorno. En este escenario, el 70 % del peso se concentra en Seguridad, "
-            "Coste y Competencia, mientras que el 30 % restante se reparte entre Censo (Demanda), Movilidad y Puntos de interés."
+            "así como en la saturación competitiva del entorno."
         ),
         "weights": {
             "SEGURIDAD": 25,
@@ -208,7 +205,7 @@ CLUSTER_DESCRIPTORS = {
     "EDAD_MEDIANA": "edad media madura",
     "INGRESO_MEDIANO_HOGAR": "alto ingreso",
     "TAMANO_HOGAR_PROMEDIO": "hogares más grandes",
-    "MOVILIDAD_PROMEDIO_DIARIA": "alto flujo de personas",
+    "MOVILIDAD_PROMEDIO_DIARIA": "alta movilidad",
     "MOV_CANTIDAD_ESTACIONES": "alta conectividad",
     "DELITO_PROPIEDAD_KM2": "menor delito patrimonial",
     "DELITO_TRANSPORTE_KM2": "menor delito en transporte",
@@ -400,11 +397,11 @@ def build_cluster_names(df):
                 break
 
         if len(top_vars) == 0:
-            cluster_names[cluster_id] = f"Cluster {cluster_id}"
+            cluster_names[cluster_id] = f"Perfil {cluster_id}"
         elif len(top_vars) == 1:
-            cluster_names[cluster_id] = top_vars[0].capitalize()
+            cluster_names[cluster_id] = f"Perfil {cluster_id} — {top_vars[0]}"
         else:
-            cluster_names[cluster_id] = f"{top_vars[0].capitalize()} y {top_vars[1]}"
+            cluster_names[cluster_id] = f"Perfil {cluster_id} — {top_vars[0]} y {top_vars[1]}"
 
     return cluster_names
 
@@ -468,13 +465,13 @@ def render_html_table(df):
 
 
 def build_grouped_context(df, scenario_name):
-    out = df[["RANK", "ID_ZONA", "NOMBRE_ZONA", "CLUSTER_NAME", "SCORE_ESCENARIO"]].head(10).copy()
+    out = df[["RANK", "ID_ZONA", "NOMBRE_ZONA", "CLUSTER_FILTER", "SCORE_ESCENARIO"]].head(10).copy()
     out["ESCENARIO"] = scenario_name
     out = out.rename(columns={
         "RANK": "Rank",
         "ID_ZONA": "ID zona",
         "NOMBRE_ZONA": "Zona",
-        "CLUSTER_NAME": "Cluster",
+        "CLUSTER_FILTER": "Perfil",
         "SCORE_ESCENARIO": "Score escenario",
         "ESCENARIO": "Escenario",
     })
@@ -534,40 +531,44 @@ def build_grouped_subdimensions(df):
     return out
 
 
-def sequential_bucket_sliders(sidebar, dims, labels, total, min_each, defaults, key_prefix):
-    """
-    Genera sliders secuenciales.
-    La última dimensión se ajusta automáticamente para cerrar el total.
-    """
-    values = {}
-    remaining_total = total
-    remaining_dims = len(dims)
+def allocate_remaining(selected_dim, selected_value, dims, total, min_each, base_weights):
+    remaining_dims = [d for d in dims if d != selected_dim]
+    remaining_total = total - selected_value
 
-    for i, dim in enumerate(dims):
-        label = labels[dim]
+    if not remaining_dims:
+        return {selected_dim: selected_value}
 
-        if i == len(dims) - 1:
-            values[dim] = remaining_total
-            sidebar.info(f"{label}: {remaining_total}% (ajuste automático)")
+    weights = {d: min_each for d in remaining_dims}
+    extra = remaining_total - (min_each * len(remaining_dims))
+
+    if extra < 0:
+        extra = 0
+
+    base = {d: max(base_weights[d] - min_each, 0) for d in remaining_dims}
+    base_sum = sum(base.values())
+
+    if base_sum == 0:
+        shares = {d: 1 / len(remaining_dims) for d in remaining_dims}
+    else:
+        shares = {d: base[d] / base_sum for d in remaining_dims}
+
+    distributed = {}
+    assigned = 0
+    for idx, d in enumerate(remaining_dims):
+        if idx == len(remaining_dims) - 1:
+            add = extra - assigned
         else:
-            min_allowed = min_each
-            max_allowed = remaining_total - min_each * (remaining_dims - 1)
-            default_val = int(round(defaults.get(dim, min_allowed)))
-            default_val = max(min_allowed, min(default_val, max_allowed))
+            add = round(extra * shares[d])
+            assigned += add
+        distributed[d] = min_each + add
 
-            val = sidebar.slider(
-                label,
-                min_value=min_allowed,
-                max_value=max_allowed,
-                value=default_val,
-                step=1,
-                key=f"{key_prefix}_{dim}",
-            )
-            values[dim] = val
-            remaining_total -= val
-            remaining_dims -= 1
+    final_weights = {selected_dim: selected_value, **distributed}
 
-    return values
+    diff = total - sum(final_weights.values())
+    last_key = remaining_dims[-1] if remaining_dims else selected_dim
+    final_weights[last_key] += diff
+
+    return final_weights
 
 
 # =========================================================
@@ -610,7 +611,8 @@ df["PCA_1"] = pca1
 df["PCA_2"] = pca2
 
 cluster_names = build_cluster_names(df)
-df["CLUSTER_NAME"] = df["CLUSTER_K4"].map(cluster_names)
+df["CLUSTER_DESC"] = df["CLUSTER_K4"].map(cluster_names)
+df["CLUSTER_FILTER"] = df["CLUSTER_K4"].apply(lambda x: f"Perfil {x}")
 
 
 # =========================================================
@@ -635,42 +637,89 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
-st.sidebar.markdown("### Distribución automática 70/30")
+st.sidebar.markdown("### Ajuste de pesos")
 st.sidebar.caption(
-    "Las dimensiones principales siempre suman 70% y las de contexto 30%. "
-    "Las últimas dimensiones de cada bloque se ajustan automáticamente."
+    "Elige qué dimensión quieres modificar. Las demás se reajustan automáticamente "
+    "para respetar la estructura del escenario."
 )
 
-default_main_raw = {}
-default_context_raw = {}
+# PRINCIPALES
+st.sidebar.markdown("**Dimensiones principales**")
+main_dims = scenario["main_dims"]
+main_labels = {d: DIMENSIONS[d]["label"] for d in main_dims}
+main_defaults = {d: scenario["weights"][d] for d in main_dims}
 
-for dim in scenario["main_dims"]:
-    default_main_raw[dim] = scenario["weights"][dim]
+main_selected = st.sidebar.selectbox(
+    "Dimensión principal a modificar",
+    options=main_dims,
+    format_func=lambda x: DIMENSIONS[x]["label"],
+    key=f"main_selected_{scenario_name}",
+)
 
-for dim in scenario["context_dims"]:
-    default_context_raw[dim] = scenario["weights"][dim]
+main_min = 15
+main_max = 70 - (len(main_dims) - 1) * main_min
 
-st.sidebar.markdown("**Dimensiones principales (mínimo 15%)**")
-main_weights = sequential_bucket_sliders(
-    sidebar=st.sidebar,
-    dims=scenario["main_dims"],
-    labels={k: DIMENSIONS[k]["label"] for k in scenario["main_dims"]},
+main_selected_value = st.sidebar.slider(
+    f"Peso de {DIMENSIONS[main_selected]['label']} (%)",
+    min_value=main_min,
+    max_value=main_max,
+    value=int(main_defaults[main_selected]),
+    step=1,
+    key=f"main_slider_{scenario_name}_{main_selected}",
+)
+
+main_weights = allocate_remaining(
+    selected_dim=main_selected,
+    selected_value=main_selected_value,
+    dims=main_dims,
     total=70,
     min_each=15,
-    defaults=default_main_raw,
-    key_prefix=f"main_{scenario_name}",
+    base_weights=main_defaults,
 )
 
-st.sidebar.markdown("**Dimensiones de contexto (mínimo 5%)**")
-context_weights = sequential_bucket_sliders(
-    sidebar=st.sidebar,
-    dims=scenario["context_dims"],
-    labels={k: DIMENSIONS[k]["label"] for k in scenario["context_dims"]},
+for d in main_dims:
+    if d != main_selected:
+        st.sidebar.info(f"{DIMENSIONS[d]['label']}: {main_weights[d]}% (ajuste automático)")
+
+# CONTEXTO
+st.sidebar.markdown("**Dimensiones de contexto**")
+context_dims = scenario["context_dims"]
+context_defaults = {d: scenario["weights"][d] for d in context_dims}
+
+context_selected = st.sidebar.selectbox(
+    "Dimensión de contexto a modificar",
+    options=context_dims,
+    format_func=lambda x: DIMENSIONS[x]["label"],
+    key=f"context_selected_{scenario_name}",
+)
+
+context_min = 5
+context_max = 30 - (len(context_dims) - 1) * context_min
+
+default_context_value = int(context_defaults[context_selected])
+default_context_value = max(context_min, min(default_context_value, context_max))
+
+context_selected_value = st.sidebar.slider(
+    f"Peso de {DIMENSIONS[context_selected]['label']} (%)",
+    min_value=context_min,
+    max_value=context_max,
+    value=default_context_value,
+    step=1,
+    key=f"context_slider_{scenario_name}_{context_selected}",
+)
+
+context_weights = allocate_remaining(
+    selected_dim=context_selected,
+    selected_value=context_selected_value,
+    dims=context_dims,
     total=30,
     min_each=5,
-    defaults=default_context_raw,
-    key_prefix=f"context_{scenario_name}",
+    base_weights=context_defaults,
 )
+
+for d in context_dims:
+    if d != context_selected:
+        st.sidebar.info(f"{DIMENSIONS[d]['label']}: {context_weights[d]}% (ajuste automático)")
 
 effective_weights = {**main_weights, **context_weights}
 scenario_scored = compute_scenario_scores(df, effective_weights)
@@ -707,8 +756,8 @@ competition_range = st.sidebar.slider(
     ),
 )
 
-flow_range = st.sidebar.slider(
-    "Flujo de personas (promedio diario)",
+mobility_range = st.sidebar.slider(
+    "Movilidad (promedio diario de personas)",
     min_value=float(scenario_scored["MOVILIDAD_PROMEDIO_DIARIA"].min()),
     max_value=float(scenario_scored["MOVILIDAD_PROMEDIO_DIARIA"].max()),
     value=(
@@ -724,18 +773,18 @@ selected_zones = st.sidebar.multiselect(
 )
 
 selected_clusters = st.sidebar.multiselect(
-    "Clusters",
-    options=sorted(df["CLUSTER_NAME"].dropna().unique().tolist()),
-    default=sorted(df["CLUSTER_NAME"].dropna().unique().tolist()),
+    "Perfiles",
+    options=sorted(df["CLUSTER_FILTER"].dropna().unique().tolist()),
+    default=sorted(df["CLUSTER_FILTER"].dropna().unique().tolist()),
 )
 
 filtered = scenario_scored[
     scenario_scored["SCORE_ESCENARIO"].between(score_range[0], score_range[1])
     & scenario_scored["ALQ_PRECIO_PIE2_ANUAL"].between(rent_range[0], rent_range[1])
     & scenario_scored["COMPETENCIA_DIRECTA_KM2"].between(competition_range[0], competition_range[1])
-    & scenario_scored["MOVILIDAD_PROMEDIO_DIARIA"].between(flow_range[0], flow_range[1])
+    & scenario_scored["MOVILIDAD_PROMEDIO_DIARIA"].between(mobility_range[0], mobility_range[1])
     & scenario_scored["NOMBRE_ZONA"].isin(selected_zones)
-    & scenario_scored["CLUSTER_NAME"].isin(selected_clusters)
+    & scenario_scored["CLUSTER_FILTER"].isin(selected_clusters)
 ].copy()
 
 if filtered.empty:
@@ -832,7 +881,7 @@ with tab1:
         hover_name="NOMBRE_ZONA",
         hover_data={
             "ID_ZONA": True,
-            "CLUSTER_NAME": True,
+            "CLUSTER_FILTER": True,
             "SCORE_ESCENARIO": ":.2f",
             "RANK": True,
             "SCORE_DIM_DEMANDA": ":.2f",
@@ -928,14 +977,15 @@ with tab3:
             filtered,
             x="PCA_1",
             y="PCA_2",
-            color="CLUSTER_NAME",
+            color="CLUSTER_FILTER",
             size="SCORE_ESCENARIO",
             hover_name="NOMBRE_ZONA",
+            hover_data={"CLUSTER_DESC": True},
             title="Clusters K-means k=4",
             labels={
                 "PCA_1": "Componente 1 del clustering",
                 "PCA_2": "Componente 2 del clustering",
-                "CLUSTER_NAME": "Cluster",
+                "CLUSTER_FILTER": "Perfil",
             }
         )
         fig_cluster.update_layout(height=460, margin=dict(l=0, r=0, t=50, b=0))
@@ -949,10 +999,10 @@ with tab3:
             color="SCORE_ESCENARIO",
             size="SCORE_ESCENARIO",
             hover_name="NOMBRE_ZONA",
-            title="Alquiler vs flujo de personas",
+            title="Alquiler vs movilidad",
             labels={
                 "ALQ_PRECIO_PIE2_ANUAL": "Alquiler (USD/pie²/año)",
-                "MOVILIDAD_PROMEDIO_DIARIA": "Flujo de personas (promedio diario)",
+                "MOVILIDAD_PROMEDIO_DIARIA": "Movilidad (promedio diario de personas)",
             }
         )
         fig_scatter.update_layout(height=460, margin=dict(l=0, r=0, t=50, b=0))
@@ -1018,7 +1068,7 @@ with tab4:
 **Regla macro**
 - Dimensiones principales: **70 %**
 - Dimensiones de contexto: **30 %**
-- La app permite modificar solo el reparto interno dentro de cada bloque, respetando siempre esa restricción.
+- La app permite modificar la dimensión elegida en cada bloque y reajusta automáticamente las demás para conservar la estructura.
 
 **Dimensiones**
 - Censo (Demanda)
@@ -1048,20 +1098,20 @@ with tab4:
     st.markdown("### Zonas por cluster")
     cluster_list_df = (
         df.sort_values(["CLUSTER_K4", "NOMBRE_ZONA"])
-        .groupby(["CLUSTER_K4", "CLUSTER_NAME"])["NOMBRE_ZONA"]
+        .groupby(["CLUSTER_K4", "CLUSTER_FILTER", "CLUSTER_DESC"])["NOMBRE_ZONA"]
         .apply(list)
         .reset_index()
     )
 
     for _, row in cluster_list_df.iterrows():
-        with st.expander(f"{row['CLUSTER_NAME']} | {len(row['NOMBRE_ZONA'])} zonas"):
+        with st.expander(f"{row['CLUSTER_FILTER']} — {row['CLUSTER_DESC']} | {len(row['NOMBRE_ZONA'])} zonas"):
             st.write(", ".join(row["NOMBRE_ZONA"]))
 
     st.markdown("### Lectura del gráfico de clustering")
     st.markdown(
         """
 - **Componente 1 del clustering** y **Componente 2 del clustering** son ejes sintéticos obtenidos mediante PCA.
-- Su función es **visualizar** en dos dimensiones la proximidad entre zonas.
+- Su función es visualizar en dos dimensiones la proximidad entre zonas.
 - No representan una variable única del dataset, sino una combinación de variables utilizadas para facilitar la lectura del agrupamiento.
 """
     )
