@@ -218,6 +218,13 @@ CLUSTER_DESCRIPTORS = {
     "ALQ_PRECIO_PIE2_ANUAL": "coste de alquiler contenido",
 }
 
+CLUSTER_LABELS = {
+    1: "Cluster A",
+    2: "Cluster B",
+    3: "Cluster C",
+    4: "Cluster D",
+}
+
 
 # =========================================================
 # FUNCIONES AUXILIARES
@@ -397,11 +404,11 @@ def build_cluster_names(df):
                 break
 
         if len(top_vars) == 0:
-            cluster_names[cluster_id] = f"Perfil {cluster_id}"
+            cluster_names[cluster_id] = "sin rasgo dominante claro"
         elif len(top_vars) == 1:
-            cluster_names[cluster_id] = f"Perfil {cluster_id} — {top_vars[0]}"
+            cluster_names[cluster_id] = top_vars[0]
         else:
-            cluster_names[cluster_id] = f"Perfil {cluster_id} — {top_vars[0]} y {top_vars[1]}"
+            cluster_names[cluster_id] = f"{top_vars[0]} y {top_vars[1]}"
 
     return cluster_names
 
@@ -471,7 +478,7 @@ def build_grouped_context(df, scenario_name):
         "RANK": "Rank",
         "ID_ZONA": "ID zona",
         "NOMBRE_ZONA": "Zona",
-        "CLUSTER_FILTER": "Perfil",
+        "CLUSTER_FILTER": "Cluster",
         "SCORE_ESCENARIO": "Score escenario",
         "ESCENARIO": "Escenario",
     })
@@ -563,7 +570,6 @@ def allocate_remaining(selected_dim, selected_value, dims, total, min_each, base
         distributed[d] = min_each + add
 
     final_weights = {selected_dim: selected_value, **distributed}
-
     diff = total - sum(final_weights.values())
     last_key = remaining_dims[-1] if remaining_dims else selected_dim
     final_weights[last_key] += diff
@@ -612,7 +618,7 @@ df["PCA_2"] = pca2
 
 cluster_names = build_cluster_names(df)
 df["CLUSTER_DESC"] = df["CLUSTER_K4"].map(cluster_names)
-df["CLUSTER_FILTER"] = df["CLUSTER_K4"].apply(lambda x: f"Perfil {x}")
+df["CLUSTER_FILTER"] = df["CLUSTER_K4"].map(CLUSTER_LABELS)
 
 
 # =========================================================
@@ -639,14 +645,15 @@ st.sidebar.markdown(
 
 st.sidebar.markdown("### Ajuste de pesos")
 st.sidebar.caption(
-    "Elige qué dimensión quieres modificar. Las demás se reajustan automáticamente "
-    "para respetar la estructura del escenario."
+    "En cada escenario, las dimensiones principales concentran el 70% del peso total y las dimensiones de contexto el 30%. "
+    "Puedes modificar una dimensión dentro de cada bloque, y la aplicación reajusta automáticamente las demás para conservar esa lógica."
 )
 
+# -----------------------------
 # PRINCIPALES
+# -----------------------------
 st.sidebar.markdown("**Dimensiones principales**")
 main_dims = scenario["main_dims"]
-main_labels = {d: DIMENSIONS[d]["label"] for d in main_dims}
 main_defaults = {d: scenario["weights"][d] for d in main_dims}
 
 main_selected = st.sidebar.selectbox(
@@ -673,7 +680,7 @@ main_weights = allocate_remaining(
     selected_value=main_selected_value,
     dims=main_dims,
     total=70,
-    min_each=15,
+    min_each=main_min,
     base_weights=main_defaults,
 )
 
@@ -681,7 +688,9 @@ for d in main_dims:
     if d != main_selected:
         st.sidebar.info(f"{DIMENSIONS[d]['label']}: {main_weights[d]}% (ajuste automático)")
 
+# -----------------------------
 # CONTEXTO
+# -----------------------------
 st.sidebar.markdown("**Dimensiones de contexto**")
 context_dims = scenario["context_dims"]
 context_defaults = {d: scenario["weights"][d] for d in context_dims}
@@ -695,7 +704,6 @@ context_selected = st.sidebar.selectbox(
 
 context_min = 5
 context_max = 30 - (len(context_dims) - 1) * context_min
-
 default_context_value = int(context_defaults[context_selected])
 default_context_value = max(context_min, min(default_context_value, context_max))
 
@@ -713,7 +721,7 @@ context_weights = allocate_remaining(
     selected_value=context_selected_value,
     dims=context_dims,
     total=30,
-    min_each=5,
+    min_each=context_min,
     base_weights=context_defaults,
 )
 
@@ -724,6 +732,9 @@ for d in context_dims:
 effective_weights = {**main_weights, **context_weights}
 scenario_scored = compute_scenario_scores(df, effective_weights)
 
+# -----------------------------
+# FILTROS
+# -----------------------------
 st.sidebar.markdown("### Filtros")
 
 score_range = st.sidebar.slider(
@@ -773,7 +784,7 @@ selected_zones = st.sidebar.multiselect(
 )
 
 selected_clusters = st.sidebar.multiselect(
-    "Perfiles",
+    "Clusters",
     options=sorted(df["CLUSTER_FILTER"].dropna().unique().tolist()),
     default=sorted(df["CLUSTER_FILTER"].dropna().unique().tolist()),
 )
@@ -866,7 +877,7 @@ with tab1:
 
     map_df = filtered.copy()
     map_df["ID_ZONA"] = map_df["ID_ZONA"].apply(clean_zone_id)
-    map_df = map_df[map_df["ID_ZONA"].isin(geojson_id_set)].copy()
+    map_df = map_df[map_df["ID_ZONA"].isin(geojson_ids)].copy()
 
     if map_df.empty:
         st.error("No hay coincidencias entre los IDs filtrados y el GeoJSON.")
@@ -905,7 +916,6 @@ with tab1:
 
     st.plotly_chart(fig_map, use_container_width=True)
 
-    # Descripción debajo del mapa
     dimension_summary = get_dimension_summary(best_zone)
     summary_lines = []
     for item in dimension_summary:
@@ -985,7 +995,7 @@ with tab3:
             labels={
                 "PCA_1": "Componente 1 del clustering",
                 "PCA_2": "Componente 2 del clustering",
-                "CLUSTER_FILTER": "Perfil",
+                "CLUSTER_FILTER": "Cluster",
             }
         )
         fig_cluster.update_layout(height=460, margin=dict(l=0, r=0, t=50, b=0))
