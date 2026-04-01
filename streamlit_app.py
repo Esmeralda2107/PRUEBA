@@ -6,9 +6,9 @@ import plotly.express as px
 import streamlit as st
 
 
-# ---------------------------------------------------------
+# =========================================================
 # CONFIGURACIÓN GENERAL
-# ---------------------------------------------------------
+# =========================================================
 st.set_page_config(
     page_title="TFM Site Selection Manhattan",
     page_icon="📍",
@@ -20,11 +20,35 @@ CSV_PATH = BASE_DIR / "datos" / "maestro" / "MASTER_DATASET_MANHATTAN_ML.csv"
 GEOJSON_DIR = BASE_DIR / "datos" / "crudos" / "zonas"
 
 
-# ---------------------------------------------------------
-# CARGA DE DATOS
-# ---------------------------------------------------------
+# =========================================================
+# FUNCIONES AUXILIARES
+# =========================================================
+def clean_zone_id(value):
+    """Normaliza IDs territoriales para que el join no falle por formato."""
+    if pd.isna(value):
+        return None
+    return str(value).strip().upper()
+
+
+def normalize(series: pd.Series, inverse: bool = False) -> pd.Series:
+    """Min-max normalization; invierte el criterio si es de coste."""
+    s = pd.to_numeric(series, errors="coerce")
+    s = s.fillna(s.median())
+
+    min_v = s.min()
+    max_v = s.max()
+
+    if max_v == min_v:
+        norm = pd.Series(0.5, index=s.index)
+    else:
+        norm = (s - min_v) / (max_v - min_v)
+
+    return 1 - norm if inverse else norm
+
+
 @st.cache_data
 def load_data():
+    """Carga CSV maestro y el primer GeoJSON encontrado en datos/crudos/zonas."""
     if not CSV_PATH.exists():
         raise FileNotFoundError(f"No existe el CSV maestro en: {CSV_PATH}")
 
@@ -42,21 +66,72 @@ def load_data():
     return df, geojson, geojson_files[0].name
 
 
-def normalize(series: pd.Series, inverse: bool = False) -> pd.Series:
-    s = pd.to_numeric(series, errors="coerce")
-    s = s.fillna(s.median())
+def detect_geojson_id_field(geojson_dict):
+    """
+    Intenta detectar automáticamente qué campo dentro de properties
+    funciona como ID para enlazar con ID_ZONA.
+    """
+    features = geojson_dict.get("features", [])
+    if not features:
+        return None
 
-    min_v = s.min()
-    max_v = s.max()
+    props = features[0].get("properties", {})
+    candidates = [
+        "NTA2020", "nta2020",
+        "NTACode", "nta_code", "NTA_CODE",
+        "NTA", "nta",
+        "id", "ID"
+    ]
 
-    if max_v == min_v:
-        norm = pd.Series(0.5, index=s.index)
-    else:
-        norm = (s - min_v) / (max_v - min_v)
+    for cand in candidates:
+        if cand in props:
+            return cand
 
-    return 1 - norm if inverse else norm
+    # Si no encuentra ninguno, devuelve el primer campo disponible
+    if props:
+        return list(props.keys())[0]
+
+    return None
 
 
+def extract_geojson_ids(geojson_dict, geo_field):
+    """Extrae y limpia todos los IDs del GeoJSON para validar el join."""
+    ids = []
+    for feature in geojson_dict.get("features", []):
+        props = feature.get("properties", {})
+        ids.append(clean_zone_id(props.get(geo_field)))
+    return ids
+
+
+def compute_score(df: pd.DataFrame, criteria_meta: dict, weights: dict) -> pd.DataFrame:
+    """Calcula score multicriterio ponderado y ranking."""
+    out = df.copy()
+
+    for col in weights.keys():
+        out[col] = pd.to_numeric(out[col], errors="coerce")
+        out[col] = out[col].fillna(out[col].median())
+
+    total_weight = sum(weights.values())
+    if total_weight == 0:
+        total_weight = 1
+
+    contrib_cols = []
+
+    for col, weight in weights.items():
+        inverse = criteria_meta[col]["type"] == "cost"
+        out[f"{col}_NORM"] = normalize(out[col], inverse=inverse)
+        out[f"CONTRIB_{col}"] = out[f"{col}_NORM"] * (weight / total_weight)
+        contrib_cols.append(f"CONTRIB_{col}")
+
+    out["SCORE"] = out[contrib_cols].sum(axis=1)
+    out["RANK"] = out["SCORE"].rank(ascending=False, method="dense").astype(int)
+
+    return out.sort_values("SCORE", ascending=False)
+
+
+# =========================================================
+# METADATOS DEL MODELO
+# =========================================================
 CRITERIA = {
     "POBLACION_KM2": {"label": "Densidad de población", "type": "benefit"},
     "INGRESO_MEDIANO_HOGAR": {"label": "Ingreso mediano del hogar", "type": "benefit"},
@@ -107,36 +182,9 @@ PRESETS = {
 }
 
 
-def compute_score(df: pd.DataFrame, weights: dict) -> pd.DataFrame:
-    out = df.copy()
-
-    numeric_cols = list(CRITERIA.keys())
-    for col in numeric_cols:
-        if col in out.columns:
-            out[col] = pd.to_numeric(out[col], errors="coerce")
-            out[col] = out[col].fillna(out[col].median())
-
-    total_weight = sum(weights.values())
-    if total_weight == 0:
-        total_weight = 1
-
-    contrib_cols = []
-
-    for col, weight in weights.items():
-        inverse = CRITERIA[col]["type"] == "cost"
-        out[f"{col}_NORM"] = normalize(out[col], inverse=inverse)
-        out[f"CONTRIB_{col}"] = out[f"{col}_NORM"] * (weight / total_weight)
-        contrib_cols.append(f"CONTRIB_{col}")
-
-    out["SCORE"] = out[contrib_cols].sum(axis=1)
-    out["RANK"] = out["SCORE"].rank(ascending=False, method="dense").astype(int)
-
-    return out.sort_values("SCORE", ascending=False)
-
-
-# ---------------------------------------------------------
-# APP
-# ---------------------------------------------------------
+# =========================================================
+# CARGA DE DATOS
+# =========================================================
 st.title("📍 Site Selection Manhattan")
 st.caption("Aplicación interactiva para el TFM: mapa, filtros, scoring multicriterio, ranking y gráficos.")
 
@@ -152,9 +200,27 @@ if missing:
     st.error(f"Faltan columnas en el CSV maestro: {missing}")
     st.stop()
 
-# ---------------------------------------------------------
-# SIDEBAR
-# ---------------------------------------------------------
+# Limpieza de IDs y nombres
+df["ID_ZONA"] = df["ID_ZONA"].apply(clean_zone_id)
+df["NOMBRE_ZONA"] = df["NOMBRE_ZONA"].astype(str).str.strip()
+
+# Detección del campo territorial en el GeoJSON
+geo_field = detect_geojson_id_field(geojson)
+if geo_field is None:
+    st.error("No se pudo detectar el campo ID dentro del GeoJSON.")
+    st.stop()
+
+geojson_ids = extract_geojson_ids(geojson, geo_field)
+geojson_id_set = set([x for x in geojson_ids if x is not None])
+csv_id_set = set(df["ID_ZONA"].dropna().unique())
+
+missing_in_geojson = sorted(csv_id_set - geojson_id_set)
+missing_in_csv = sorted(geojson_id_set - csv_id_set)
+
+
+# =========================================================
+# BARRA LATERAL
+# =========================================================
 st.sidebar.header("⚙️ Configuración del modelo")
 
 scenario = st.sidebar.selectbox("Escenario base", list(PRESETS.keys()))
@@ -171,7 +237,7 @@ weights = {}
 st.sidebar.markdown("### Pesos")
 for col in selected_criteria:
     weights[col] = st.sidebar.slider(
-        f"{CRITERIA[col]['label']}",
+        CRITERIA[col]["label"],
         min_value=0,
         max_value=100,
         value=int(default_weights.get(col, 10)),
@@ -182,11 +248,8 @@ if sum(weights.values()) == 0:
     st.sidebar.warning("Asigna al menos un peso mayor que 0.")
     st.stop()
 
-scored = compute_score(df, weights)
+scored = compute_score(df, CRITERIA, weights)
 
-# ---------------------------------------------------------
-# FILTROS
-# ---------------------------------------------------------
 st.sidebar.markdown("### Filtros")
 score_min = st.sidebar.slider("Score mínimo", 0.0, 1.0, 0.0, 0.01)
 
@@ -239,24 +302,44 @@ filtered = filtered.sort_values("SCORE", ascending=False).reset_index(drop=True)
 filtered["RANK"] = filtered["SCORE"].rank(ascending=False, method="dense").astype(int)
 
 best_zone = filtered.iloc[0]
-
 criterion_star = max(
     selected_criteria,
     key=lambda c: best_zone.get(f"CONTRIB_{c}", 0)
 )
 
-# ---------------------------------------------------------
-# KPIs
-# ---------------------------------------------------------
+
+# =========================================================
+# KPIS
+# =========================================================
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Mejor zona", best_zone["NOMBRE_ZONA"])
 c2.metric("Score máximo", f"{best_zone['SCORE']:.3f}")
 c3.metric("Zonas visibles", f"{len(filtered)}")
 c4.metric("Factor dominante", CRITERIA[criterion_star]["label"])
 
-# ---------------------------------------------------------
+
+# =========================================================
+# DIAGNÓSTICO DEL JOIN
+# =========================================================
+with st.expander("Diagnóstico mapa / join CSV ↔ GeoJSON"):
+    st.write("Archivo GeoJSON cargado:", geojson_filename)
+    st.write("Campo detectado en GeoJSON para el join:", geo_field)
+    st.write("Ejemplo IDs CSV:", sorted(list(csv_id_set))[:10])
+    st.write("Ejemplo IDs GeoJSON:", sorted(list(geojson_id_set))[:10])
+    st.write("Total IDs CSV:", len(csv_id_set))
+    st.write("Total IDs GeoJSON:", len(geojson_id_set))
+    st.write("IDs del CSV que NO están en el GeoJSON:", missing_in_geojson[:20])
+    st.write("IDs del GeoJSON que NO están en el CSV:", missing_in_csv[:20])
+
+    features = geojson.get("features", [])
+    if features:
+        st.write("Propiedades del primer feature del GeoJSON:")
+        st.json(features[0].get("properties", {}))
+
+
+# =========================================================
 # TABS
-# ---------------------------------------------------------
+# =========================================================
 tab1, tab2, tab3, tab4 = st.tabs(["🗺️ Mapa", "🏆 Ranking", "📊 Gráficos", "📘 Metodología"])
 
 
@@ -269,11 +352,32 @@ with tab1:
         format_func=lambda x: "Score final" if x == "SCORE" else CRITERIA[x]["label"],
     )
 
+    map_df = filtered.copy()
+    map_df["ID_ZONA"] = map_df["ID_ZONA"].apply(clean_zone_id)
+
+    matched = map_df["ID_ZONA"].isin(geojson_id_set)
+    unmatched_rows = map_df.loc[~matched, ["ID_ZONA", "NOMBRE_ZONA"]]
+
+    if unmatched_rows.shape[0] > 0:
+        st.warning("Estas zonas no encuentran polígono en el GeoJSON:")
+        st.dataframe(unmatched_rows, use_container_width=True, hide_index=True)
+
+    map_df = map_df.loc[matched].copy()
+
+    if map_df.empty:
+        st.error(
+            "Después de validar IDs, no queda ninguna zona con geometría asociada. "
+            "Revisa el campo territorial del GeoJSON y el formato de ID_ZONA."
+        )
+        st.stop()
+
+    # Plotly documenta que el GeoJSON debe enlazarse con locations + featureidkey;
+    # aquí lo hacemos usando el campo detectado automáticamente dentro de properties.
     fig_map = px.choropleth_mapbox(
-        filtered,
+        map_df,
         geojson=geojson,
         locations="ID_ZONA",
-        featureidkey="properties.NTA2020",
+        featureidkey=f"properties.{geo_field}",
         color=map_metric,
         hover_name="NOMBRE_ZONA",
         hover_data={
@@ -301,7 +405,7 @@ with tab1:
     )
 
     st.plotly_chart(fig_map, use_container_width=True)
-    st.caption(f"GeoJSON cargado desde: datos/crudos/zonas/{geojson_filename}")
+    st.caption(f"Join usado en el mapa: ID_ZONA ↔ properties.{geo_field}")
 
 
 with tab2:
@@ -380,9 +484,9 @@ Se calcula un score multicriterio ponderado:
 Score_i = \\sum_j w_j \\cdot x_{ij}^{norm}
 \\]
 
-- Los criterios de tipo **benefit** suman más cuando su valor es alto.
-- Los criterios de tipo **cost** se invierten, para que un valor bajo sea mejor.
-- Los pesos se normalizan automáticamente según la suma total elegida en la barra lateral.
+- Los criterios **benefit** premian valores altos.
+- Los criterios **cost** se invierten, para que valores bajos sean mejores.
+- Los pesos se normalizan automáticamente según la suma total elegida.
 
 **Criterios benefit**
 - Densidad de población
