@@ -15,7 +15,7 @@ from sklearn.preprocessing import StandardScaler
 # CONFIGURACIÓN GENERAL
 # =========================================================
 st.set_page_config(
-    page_title="TFM_GRUPO 7 SITE SELECTION MANHATTAN",
+    page_title="TFM GRUPO 7 SITE SELECTION MANHATTAN",
     page_icon="📍",
     layout="wide",
 )
