@@ -1,16 +1,21 @@
 from pathlib import Path
 import json
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 
 
 # =========================================================
 # CONFIGURACIÓN GENERAL
 # =========================================================
 st.set_page_config(
-    page_title="TFM Site Selection Manhattan",
+    page_title="TFM_GRUPO Y SITE SELECTION MANHATTAN",
     page_icon="📍",
     layout="wide",
 )
@@ -21,17 +26,229 @@ GEOJSON_DIR = BASE_DIR / "datos" / "crudos" / "zonas"
 
 
 # =========================================================
+# ESTILOS
+# =========================================================
+st.markdown(
+    """
+    <style>
+    .metric-card {
+        background-color: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        padding: 16px 18px;
+        min-height: 120px;
+    }
+    .metric-title {
+        font-size: 0.90rem;
+        color: #475569;
+        margin-bottom: 8px;
+    }
+    .metric-value {
+        font-size: 1.35rem;
+        font-weight: 700;
+        color: #0f172a;
+        line-height: 1.25;
+        word-wrap: break-word;
+        overflow-wrap: anywhere;
+    }
+    .metric-sub {
+        font-size: 0.85rem;
+        color: #64748b;
+        margin-top: 8px;
+    }
+    .scenario-box {
+        background-color: #f1f5f9;
+        border-left: 4px solid #0f766e;
+        padding: 12px 14px;
+        border-radius: 10px;
+        margin-bottom: 10px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# =========================================================
+# METADATOS DEL MODELO
+# =========================================================
+DIMENSIONS = {
+    "DEMANDA": {
+        "label": "Censo (Demanda)",
+        "variables": {
+            "POBLACION_KM2": {
+                "label": "Población por km²",
+                "weight": 30,
+                "sense": "direct",
+            },
+            "PORCENTAJE_HISPANOS": {
+                "label": "Porcentaje hispanos",
+                "weight": 30,
+                "sense": "direct",
+            },
+            "EDAD_MEDIANA": {
+                "label": "Edad mediana",
+                "weight": 10,
+                "sense": "direct",
+            },
+            "INGRESO_MEDIANO_HOGAR": {
+                "label": "Ingreso mediano del hogar",
+                "weight": 20,
+                "sense": "direct",
+            },
+            "TAMANO_HOGAR_PROMEDIO": {
+                "label": "Tamaño hogar promedio",
+                "weight": 10,
+                "sense": "direct",
+            },
+        },
+    },
+    "MOVILIDAD": {
+        "label": "Movilidad",
+        "variables": {
+            "MOVILIDAD_PROMEDIO_DIARIA": {
+                "label": "Movilidad promedio diaria",
+                "weight": 70,
+                "sense": "direct",
+            },
+            "MOV_CANTIDAD_ESTACIONES": {
+                "label": "Cantidad de estaciones",
+                "weight": 30,
+                "sense": "direct",
+            },
+        },
+    },
+    "SEGURIDAD": {
+        "label": "Seguridad",
+        "variables": {
+            "DELITO_PROPIEDAD_KM2": {
+                "label": "Delito propiedad por km²",
+                "weight": 40,
+                "sense": "inverse",
+            },
+            "DELITO_TRANSPORTE_KM2": {
+                "label": "Delito transporte por km²",
+                "weight": 40,
+                "sense": "inverse",
+            },
+            "DELITO_OTROS_KM2": {
+                "label": "Otros delitos por km²",
+                "weight": 20,
+                "sense": "inverse",
+            },
+        },
+    },
+    "PUNTOS_INTERES": {
+        "label": "Puntos de interés",
+        "variables": {
+            "LUGARES_COMERCIO_KM2": {
+                "label": "Lugares comercio por km²",
+                "weight": 40,
+                "sense": "direct",
+            },
+            "LUGARES_OFICINAS_KM2": {
+                "label": "Lugares oficinas por km²",
+                "weight": 40,
+                "sense": "direct",
+            },
+            "LUGARES_RESIDENCIAL_KM2": {
+                "label": "Lugares residencial por km²",
+                "weight": 20,
+                "sense": "direct",
+            },
+        },
+    },
+    "COMPETENCIA": {
+        "label": "Competencia",
+        "variables": {
+            "COMPETENCIA_DIRECTA_KM2": {
+                "label": "Competencia directa por km²",
+                "weight": 70,
+                "sense": "inverse",
+            },
+            "COMPETENCIA_INDIRECTA_KM2": {
+                "label": "Competencia indirecta por km²",
+                "weight": 30,
+                "sense": "direct",
+            },
+        },
+    },
+    "COSTE": {
+        "label": "Coste",
+        "variables": {
+            "ALQ_PRECIO_PIE2_ANUAL": {
+                "label": "Precio alquiler pie² anual",
+                "weight": 100,
+                "sense": "inverse",
+            },
+        },
+    },
+}
+
+SCENARIOS = {
+    "Potencial de demanda": {
+        "description": (
+            "Prioriza la capacidad de atracción comercial de la zona. "
+            "Da mayor peso a la demanda y a los puntos de interés, "
+            "manteniendo el resto como contexto."
+        ),
+        "weights": {
+            "DEMANDA": 35,
+            "PUNTOS_INTERES": 35,
+            "MOVILIDAD": 10,
+            "SEGURIDAD": 10,
+            "COSTE": 5,
+            "COMPETENCIA": 5,
+        },
+        "main_dims": ["DEMANDA", "PUNTOS_INTERES"],
+        "context_dims": ["MOVILIDAD", "SEGURIDAD", "COSTE", "COMPETENCIA"],
+    },
+    "Eficiencia y flujo": {
+        "description": (
+            "Prioriza las condiciones urbanas más relevantes para un modelo "
+            "fast casual orientado al take-away. Da más peso a movilidad "
+            "y puntos de interés."
+        ),
+        "weights": {
+            "MOVILIDAD": 40,
+            "PUNTOS_INTERES": 30,
+            "DEMANDA": 10,
+            "SEGURIDAD": 10,
+            "COSTE": 5,
+            "COMPETENCIA": 5,
+        },
+        "main_dims": ["MOVILIDAD", "PUNTOS_INTERES"],
+        "context_dims": ["DEMANDA", "SEGURIDAD", "COSTE", "COMPETENCIA"],
+    },
+    "Viabilidad y riesgo": {
+        "description": (
+            "Enfatiza la estabilidad operativa y económica de la implantación, "
+            "así como la saturación competitiva del entorno."
+        ),
+        "weights": {
+            "SEGURIDAD": 25,
+            "COSTE": 25,
+            "COMPETENCIA": 20,
+            "DEMANDA": 10,
+            "MOVILIDAD": 10,
+            "PUNTOS_INTERES": 10,
+        },
+        "main_dims": ["SEGURIDAD", "COSTE", "COMPETENCIA"],
+        "context_dims": ["DEMANDA", "MOVILIDAD", "PUNTOS_INTERES"],
+    },
+}
+
+
+# =========================================================
 # FUNCIONES AUXILIARES
 # =========================================================
 def clean_zone_id(value):
-    """Normaliza IDs territoriales para que el join no falle por formato."""
     if pd.isna(value):
         return None
     return str(value).strip().upper()
 
 
-def normalize(series: pd.Series, inverse: bool = False) -> pd.Series:
-    """Min-max normalization; invierte el criterio si es de coste."""
+def score_0_100(series: pd.Series, sense: str = "direct") -> pd.Series:
     s = pd.to_numeric(series, errors="coerce")
     s = s.fillna(s.median())
 
@@ -39,16 +256,54 @@ def normalize(series: pd.Series, inverse: bool = False) -> pd.Series:
     max_v = s.max()
 
     if max_v == min_v:
-        norm = pd.Series(0.5, index=s.index)
+        scored = pd.Series(50.0, index=s.index)
     else:
-        norm = (s - min_v) / (max_v - min_v)
+        if sense == "direct":
+            scored = ((s - min_v) / (max_v - min_v)) * 100
+        else:
+            scored = ((max_v - s) / (max_v - min_v)) * 100
 
-    return 1 - norm if inverse else norm
+    return scored.round(2)
+
+
+def detect_geojson_id_field(geojson_dict):
+    features = geojson_dict.get("features", [])
+    if not features:
+        return None
+
+    props = features[0].get("properties", {})
+    candidates = [
+        "NTA2020",
+        "nta2020",
+        "NTACode",
+        "NTA_CODE",
+        "nta_code",
+        "NTA",
+        "nta",
+        "id",
+        "ID",
+    ]
+
+    for cand in candidates:
+        if cand in props:
+            return cand
+
+    if props:
+        return list(props.keys())[0]
+
+    return None
+
+
+def extract_geojson_ids(geojson_dict, geo_field):
+    ids = []
+    for feature in geojson_dict.get("features", []):
+        props = feature.get("properties", {})
+        ids.append(clean_zone_id(props.get(geo_field)))
+    return ids
 
 
 @st.cache_data
 def load_data():
-    """Carga CSV maestro y el primer GeoJSON encontrado en datos/crudos/zonas."""
     if not CSV_PATH.exists():
         raise FileNotFoundError(f"No existe el CSV maestro en: {CSV_PATH}")
 
@@ -66,127 +321,93 @@ def load_data():
     return df, geojson, geojson_files[0].name
 
 
-def detect_geojson_id_field(geojson_dict):
-    """
-    Intenta detectar automáticamente qué campo dentro de properties
-    funciona como ID para enlazar con ID_ZONA.
-    """
-    features = geojson_dict.get("features", [])
-    if not features:
-        return None
+def validate_columns(df):
+    required = ["ID_ZONA", "NOMBRE_ZONA"]
+    for dim_key, dim_meta in DIMENSIONS.items():
+        required.extend(list(dim_meta["variables"].keys()))
 
-    props = features[0].get("properties", {})
-    candidates = [
-        "NTA2020", "nta2020",
-        "NTACode", "nta_code", "NTA_CODE",
-        "NTA", "nta",
-        "id", "ID"
-    ]
-
-    for cand in candidates:
-        if cand in props:
-            return cand
-
-    # Si no encuentra ninguno, devuelve el primer campo disponible
-    if props:
-        return list(props.keys())[0]
-
-    return None
+    missing = [c for c in required if c not in df.columns]
+    return missing
 
 
-def extract_geojson_ids(geojson_dict, geo_field):
-    """Extrae y limpia todos los IDs del GeoJSON para validar el join."""
-    ids = []
-    for feature in geojson_dict.get("features", []):
-        props = feature.get("properties", {})
-        ids.append(clean_zone_id(props.get(geo_field)))
-    return ids
-
-
-def compute_score(df: pd.DataFrame, criteria_meta: dict, weights: dict) -> pd.DataFrame:
-    """Calcula score multicriterio ponderado y ranking."""
+def compute_dimension_scores(df):
     out = df.copy()
 
-    for col in weights.keys():
-        out[col] = pd.to_numeric(out[col], errors="coerce")
-        out[col] = out[col].fillna(out[col].median())
+    for dim_key, dim_meta in DIMENSIONS.items():
+        contrib_cols = []
 
-    total_weight = sum(weights.values())
-    if total_weight == 0:
-        total_weight = 1
+        for var, var_meta in dim_meta["variables"].items():
+            out[var] = pd.to_numeric(out[var], errors="coerce")
+            out[var] = out[var].fillna(out[var].median())
+
+            score_col = f"SCORE_VAR_{var}"
+            contrib_col = f"CONTRIB_VAR_{var}"
+
+            out[score_col] = score_0_100(out[var], var_meta["sense"])
+            out[contrib_col] = out[score_col] * (var_meta["weight"] / 100)
+            contrib_cols.append(contrib_col)
+
+        out[f"SCORE_DIM_{dim_key}"] = out[contrib_cols].sum(axis=1).round(2)
+
+    return out
+
+
+def compute_scenario_scores(df, scenario_name):
+    out = df.copy()
+    scenario = SCENARIOS[scenario_name]
 
     contrib_cols = []
+    for dim_key, weight in scenario["weights"].items():
+        dim_score_col = f"SCORE_DIM_{dim_key}"
+        contrib_col = f"CONTRIB_DIM_{dim_key}"
+        out[contrib_col] = out[dim_score_col] * (weight / 100)
+        contrib_cols.append(contrib_col)
 
-    for col, weight in weights.items():
-        inverse = criteria_meta[col]["type"] == "cost"
-        out[f"{col}_NORM"] = normalize(out[col], inverse=inverse)
-        out[f"CONTRIB_{col}"] = out[f"{col}_NORM"] * (weight / total_weight)
-        contrib_cols.append(f"CONTRIB_{col}")
+    out["SCORE_ESCENARIO"] = out[contrib_cols].sum(axis=1).round(2)
+    out["RANK"] = out["SCORE_ESCENARIO"].rank(
+        ascending=False, method="dense"
+    ).astype(int)
 
-    out["SCORE"] = out[contrib_cols].sum(axis=1)
-    out["RANK"] = out["SCORE"].rank(ascending=False, method="dense").astype(int)
-
-    return out.sort_values("SCORE", ascending=False)
+    return out.sort_values("SCORE_ESCENARIO", ascending=False)
 
 
-# =========================================================
-# METADATOS DEL MODELO
-# =========================================================
-CRITERIA = {
-    "POBLACION_KM2": {"label": "Densidad de población", "type": "benefit"},
-    "INGRESO_MEDIANO_HOGAR": {"label": "Ingreso mediano del hogar", "type": "benefit"},
-    "MOV_CANTIDAD_ESTACIONES": {"label": "Cantidad de estaciones", "type": "benefit"},
-    "MOVILIDAD_PROMEDIO_DIARIA": {"label": "Movilidad promedio diaria", "type": "benefit"},
-    "ALQ_PRECIO_PIE2_ANUAL": {"label": "Precio alquiler pie² anual", "type": "cost"},
-    "DELITO_PROPIEDAD_KM2": {"label": "Delito propiedad por km²", "type": "cost"},
-    "COMPETENCIA_DIRECTA_KM2": {"label": "Competencia directa por km²", "type": "cost"},
-}
+@st.cache_data
+def compute_clusters(df, feature_cols):
+    x = df[feature_cols].copy()
+    for col in feature_cols:
+        x[col] = pd.to_numeric(x[col], errors="coerce")
+        x[col] = x[col].fillna(x[col].median())
 
-PRESETS = {
-    "Balanceado": {
-        "POBLACION_KM2": 20,
-        "INGRESO_MEDIANO_HOGAR": 20,
-        "MOV_CANTIDAD_ESTACIONES": 15,
-        "MOVILIDAD_PROMEDIO_DIARIA": 15,
-        "ALQ_PRECIO_PIE2_ANUAL": 10,
-        "DELITO_PROPIEDAD_KM2": 10,
-        "COMPETENCIA_DIRECTA_KM2": 10,
-    },
-    "Máxima demanda": {
-        "POBLACION_KM2": 30,
-        "INGRESO_MEDIANO_HOGAR": 25,
-        "MOV_CANTIDAD_ESTACIONES": 15,
-        "MOVILIDAD_PROMEDIO_DIARIA": 20,
-        "ALQ_PRECIO_PIE2_ANUAL": 5,
-        "DELITO_PROPIEDAD_KM2": 3,
-        "COMPETENCIA_DIRECTA_KM2": 2,
-    },
-    "Control de coste": {
-        "POBLACION_KM2": 15,
-        "INGRESO_MEDIANO_HOGAR": 15,
-        "MOV_CANTIDAD_ESTACIONES": 10,
-        "MOVILIDAD_PROMEDIO_DIARIA": 10,
-        "ALQ_PRECIO_PIE2_ANUAL": 30,
-        "DELITO_PROPIEDAD_KM2": 10,
-        "COMPETENCIA_DIRECTA_KM2": 10,
-    },
-    "Seguridad primero": {
-        "POBLACION_KM2": 15,
-        "INGRESO_MEDIANO_HOGAR": 15,
-        "MOV_CANTIDAD_ESTACIONES": 10,
-        "MOVILIDAD_PROMEDIO_DIARIA": 10,
-        "ALQ_PRECIO_PIE2_ANUAL": 10,
-        "DELITO_PROPIEDAD_KM2": 30,
-        "COMPETENCIA_DIRECTA_KM2": 10,
-    },
-}
+    scaler = StandardScaler()
+    x_scaled = scaler.fit_transform(x)
+
+    km = KMeans(n_clusters=4, random_state=42, n_init=10)
+    clusters = km.fit_predict(x_scaled)
+
+    pca = PCA(n_components=2, random_state=42)
+    coords = pca.fit_transform(x_scaled)
+
+    return clusters, coords[:, 0], coords[:, 1]
+
+
+def metric_card(title, value, subtitle=""):
+    st.markdown(
+        f"""
+        <div class="metric-card">
+            <div class="metric-title">{title}</div>
+            <div class="metric-value">{value}</div>
+            <div class="metric-sub">{subtitle}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 # =========================================================
-# CARGA DE DATOS
+# CARGA Y PREPARACIÓN
 # =========================================================
-st.title("📍 Site Selection Manhattan")
-st.caption("Aplicación interactiva para el TFM: mapa, filtros, scoring multicriterio, ranking y gráficos.")
+st.title("TFM_GRUPO Y SITE SELECTION MANHATTAN")
+st.caption("Aplicación interactiva para evaluación territorial, scoring multicriterio y escenarios de decisión.")
 
 try:
     df, geojson, geojson_filename = load_data()
@@ -194,67 +415,83 @@ except Exception as e:
     st.error(str(e))
     st.stop()
 
-required_cols = ["ID_ZONA", "NOMBRE_ZONA"] + list(CRITERIA.keys())
-missing = [c for c in required_cols if c not in df.columns]
-if missing:
-    st.error(f"Faltan columnas en el CSV maestro: {missing}")
+missing_cols = validate_columns(df)
+if missing_cols:
+    st.error(f"Faltan columnas necesarias en el CSV maestro: {missing_cols}")
     st.stop()
 
-# Limpieza de IDs y nombres
 df["ID_ZONA"] = df["ID_ZONA"].apply(clean_zone_id)
 df["NOMBRE_ZONA"] = df["NOMBRE_ZONA"].astype(str).str.strip()
 
-# Detección del campo territorial en el GeoJSON
 geo_field = detect_geojson_id_field(geojson)
 if geo_field is None:
-    st.error("No se pudo detectar el campo ID dentro del GeoJSON.")
+    st.error("No se pudo detectar el campo ID del GeoJSON.")
     st.stop()
 
 geojson_ids = extract_geojson_ids(geojson, geo_field)
 geojson_id_set = set([x for x in geojson_ids if x is not None])
-csv_id_set = set(df["ID_ZONA"].dropna().unique())
 
-missing_in_geojson = sorted(csv_id_set - geojson_id_set)
-missing_in_csv = sorted(geojson_id_set - csv_id_set)
+all_feature_cols = []
+for dim_meta in DIMENSIONS.values():
+    all_feature_cols.extend(list(dim_meta["variables"].keys()))
+
+df = compute_dimension_scores(df)
+
+if "CLUSTER_K4" not in df.columns:
+    clusters, pca1, pca2 = compute_clusters(df, all_feature_cols)
+    df["CLUSTER_K4"] = (clusters + 1).astype(int)
+    df["PCA_1"] = pca1
+    df["PCA_2"] = pca2
+else:
+    df["CLUSTER_K4"] = pd.to_numeric(df["CLUSTER_K4"], errors="coerce").fillna(0).astype(int)
+    clusters, pca1, pca2 = compute_clusters(df, all_feature_cols)
+    df["PCA_1"] = pca1
+    df["PCA_2"] = pca2
 
 
 # =========================================================
-# BARRA LATERAL
+# SIDEBAR
 # =========================================================
-st.sidebar.header("⚙️ Configuración del modelo")
+st.sidebar.header("Escenario y filtros")
 
-scenario = st.sidebar.selectbox("Escenario base", list(PRESETS.keys()))
-default_weights = PRESETS[scenario]
-
-selected_criteria = st.sidebar.multiselect(
-    "Criterios activos",
-    options=list(CRITERIA.keys()),
-    default=list(default_weights.keys()),
-    format_func=lambda x: CRITERIA[x]["label"],
+scenario_name = st.sidebar.selectbox(
+    "Escenario de decisión",
+    options=list(SCENARIOS.keys()),
 )
 
-weights = {}
-st.sidebar.markdown("### Pesos")
-for col in selected_criteria:
-    weights[col] = st.sidebar.slider(
-        CRITERIA[col]["label"],
-        min_value=0,
-        max_value=100,
-        value=int(default_weights.get(col, 10)),
-        step=5,
-    )
+scenario = SCENARIOS[scenario_name]
 
-if sum(weights.values()) == 0:
-    st.sidebar.warning("Asigna al menos un peso mayor que 0.")
-    st.stop()
+st.sidebar.markdown(
+    f"""
+    <div class="scenario-box">
+        <strong>{scenario_name}</strong><br>
+        {scenario["description"]}
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
-scored = compute_score(df, CRITERIA, weights)
+main_dims_text = " · ".join(DIMENSIONS[d]["label"] for d in scenario["main_dims"])
+context_dims_text = " · ".join(DIMENSIONS[d]["label"] for d in scenario["context_dims"])
 
-st.sidebar.markdown("### Filtros")
-score_min = st.sidebar.slider("Score mínimo", 0.0, 1.0, 0.0, 0.01)
+st.sidebar.markdown("**Dimensiones principales (70%)**")
+st.sidebar.write(main_dims_text)
+st.sidebar.markdown("**Dimensiones de contexto (30%)**")
+st.sidebar.write(context_dims_text)
 
-rent_min = float(scored["ALQ_PRECIO_PIE2_ANUAL"].min())
-rent_max = float(scored["ALQ_PRECIO_PIE2_ANUAL"].max())
+scenario_scored = compute_scenario_scores(df, scenario_name)
+
+score_min = float(scenario_scored["SCORE_ESCENARIO"].min())
+score_max = float(scenario_scored["SCORE_ESCENARIO"].max())
+score_range = st.sidebar.slider(
+    "Rango de score",
+    min_value=score_min,
+    max_value=score_max,
+    value=(score_min, score_max),
+)
+
+rent_min = float(scenario_scored["ALQ_PRECIO_PIE2_ANUAL"].min())
+rent_max = float(scenario_scored["ALQ_PRECIO_PIE2_ANUAL"].max())
 rent_range = st.sidebar.slider(
     "Rango alquiler",
     min_value=rent_min,
@@ -262,117 +499,130 @@ rent_range = st.sidebar.slider(
     value=(rent_min, rent_max),
 )
 
-income_min = float(scored["INGRESO_MEDIANO_HOGAR"].min())
-income_max = float(scored["INGRESO_MEDIANO_HOGAR"].max())
-income_range = st.sidebar.slider(
-    "Rango ingreso mediano",
-    min_value=income_min,
-    max_value=income_max,
-    value=(income_min, income_max),
+# Variable de contexto / apoyo para filtrar
+comp_ind_min = float(scenario_scored["COMPETENCIA_INDIRECTA_KM2"].min())
+comp_ind_max = float(scenario_scored["COMPETENCIA_INDIRECTA_KM2"].max())
+comp_ind_range = st.sidebar.slider(
+    "Rango competencia indirecta",
+    min_value=comp_ind_min,
+    max_value=comp_ind_max,
+    value=(comp_ind_min, comp_ind_max),
 )
 
-crime_max = float(scored["DELITO_PROPIEDAD_KM2"].max())
-crime_limit = st.sidebar.slider(
-    "Máximo delito propiedad por km²",
-    min_value=0.0,
-    max_value=crime_max,
-    value=crime_max,
+cluster_options = sorted(scenario_scored["CLUSTER_K4"].dropna().unique().tolist())
+selected_clusters = st.sidebar.multiselect(
+    "Clusters K=4",
+    options=cluster_options,
+    default=cluster_options,
 )
 
-zone_options = sorted(scored["NOMBRE_ZONA"].dropna().unique().tolist())
+zone_options = sorted(scenario_scored["NOMBRE_ZONA"].dropna().unique().tolist())
 selected_zones = st.sidebar.multiselect(
-    "Filtrar zonas concretas",
+    "Zonas filtradas",
     options=zone_options,
     default=zone_options,
 )
 
-filtered = scored[
-    (scored["SCORE"] >= score_min)
-    & (scored["ALQ_PRECIO_PIE2_ANUAL"].between(rent_range[0], rent_range[1]))
-    & (scored["INGRESO_MEDIANO_HOGAR"].between(income_range[0], income_range[1]))
-    & (scored["DELITO_PROPIEDAD_KM2"] <= crime_limit)
-    & (scored["NOMBRE_ZONA"].isin(selected_zones))
+filtered = scenario_scored[
+    scenario_scored["SCORE_ESCENARIO"].between(score_range[0], score_range[1])
+    & scenario_scored["ALQ_PRECIO_PIE2_ANUAL"].between(rent_range[0], rent_range[1])
+    & scenario_scored["COMPETENCIA_INDIRECTA_KM2"].between(comp_ind_range[0], comp_ind_range[1])
+    & scenario_scored["CLUSTER_K4"].isin(selected_clusters)
+    & scenario_scored["NOMBRE_ZONA"].isin(selected_zones)
 ].copy()
 
 if filtered.empty:
     st.warning("No hay zonas que cumplan los filtros actuales.")
     st.stop()
 
-filtered = filtered.sort_values("SCORE", ascending=False).reset_index(drop=True)
-filtered["RANK"] = filtered["SCORE"].rank(ascending=False, method="dense").astype(int)
+filtered = filtered.sort_values("SCORE_ESCENARIO", ascending=False).reset_index(drop=True)
+filtered["RANK"] = filtered["SCORE_ESCENARIO"].rank(ascending=False, method="dense").astype(int)
 
 best_zone = filtered.iloc[0]
-criterion_star = max(
-    selected_criteria,
-    key=lambda c: best_zone.get(f"CONTRIB_{c}", 0)
-)
+
+dominance = []
+for dim_key in scenario["weights"]:
+    dominance.append(
+        (
+            DIMENSIONS[dim_key]["label"],
+            best_zone[f"CONTRIB_DIM_{dim_key}"],
+        )
+    )
+dominance = sorted(dominance, key=lambda x: x[1], reverse=True)
+top_dominant = " · ".join([x[0] for x in dominance[:3]])
 
 
 # =========================================================
-# KPIS
+# KPIs
 # =========================================================
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Mejor zona", best_zone["NOMBRE_ZONA"])
-c2.metric("Score máximo", f"{best_zone['SCORE']:.3f}")
-c3.metric("Zonas visibles", f"{len(filtered)}")
-c4.metric("Factor dominante", CRITERIA[criterion_star]["label"])
+c1, c2, c3, c4 = st.columns([2.2, 1.1, 1.1, 1.8])
 
+with c1:
+    metric_card(
+        "Mejor zona",
+        best_zone["NOMBRE_ZONA"],
+        f"ID: {best_zone['ID_ZONA']}",
+    )
 
-# =========================================================
-# DIAGNÓSTICO DEL JOIN
-# =========================================================
-with st.expander("Diagnóstico mapa / join CSV ↔ GeoJSON"):
-    st.write("Archivo GeoJSON cargado:", geojson_filename)
-    st.write("Campo detectado en GeoJSON para el join:", geo_field)
-    st.write("Ejemplo IDs CSV:", sorted(list(csv_id_set))[:10])
-    st.write("Ejemplo IDs GeoJSON:", sorted(list(geojson_id_set))[:10])
-    st.write("Total IDs CSV:", len(csv_id_set))
-    st.write("Total IDs GeoJSON:", len(geojson_id_set))
-    st.write("IDs del CSV que NO están en el GeoJSON:", missing_in_geojson[:20])
-    st.write("IDs del GeoJSON que NO están en el CSV:", missing_in_csv[:20])
+with c2:
+    metric_card(
+        "Score del escenario",
+        f"{best_zone['SCORE_ESCENARIO']:.2f}",
+        scenario_name,
+    )
 
-    features = geojson.get("features", [])
-    if features:
-        st.write("Propiedades del primer feature del GeoJSON:")
-        st.json(features[0].get("properties", {}))
+with c3:
+    metric_card(
+        "Zonas visibles",
+        f"{len(filtered)}",
+        "Tras aplicar filtros",
+    )
+
+with c4:
+    metric_card(
+        "Factores dominantes",
+        top_dominant,
+        "Top 3 dimensiones que más aportan a la mejor zona",
+    )
 
 
 # =========================================================
 # TABS
 # =========================================================
-tab1, tab2, tab3, tab4 = st.tabs(["🗺️ Mapa", "🏆 Ranking", "📊 Gráficos", "📘 Metodología"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    ["🗺️ Mapa", "🏆 Ranking", "📊 Gráficos", "📘 Metodología", "🧪 Diagnóstico"]
+)
 
 
+# =========================================================
+# TAB MAPA
+# =========================================================
 with tab1:
-    st.subheader("Mapa interactivo de site selection")
+    st.subheader("Mapa interactivo por escenario y dimensiones")
+
+    map_options = ["SCORE_ESCENARIO"] + [f"SCORE_DIM_{d}" for d in DIMENSIONS.keys()]
+    option_labels = {
+        "SCORE_ESCENARIO": f"Score final - {scenario_name}",
+        **{
+            f"SCORE_DIM_{d}": DIMENSIONS[d]["label"]
+            for d in DIMENSIONS.keys()
+        },
+    }
 
     map_metric = st.selectbox(
-        "Variable a pintar en el mapa",
-        options=["SCORE"] + selected_criteria,
-        format_func=lambda x: "Score final" if x == "SCORE" else CRITERIA[x]["label"],
+        "Variable a visualizar en el mapa",
+        options=map_options,
+        format_func=lambda x: option_labels[x],
     )
 
     map_df = filtered.copy()
     map_df["ID_ZONA"] = map_df["ID_ZONA"].apply(clean_zone_id)
-
-    matched = map_df["ID_ZONA"].isin(geojson_id_set)
-    unmatched_rows = map_df.loc[~matched, ["ID_ZONA", "NOMBRE_ZONA"]]
-
-    if unmatched_rows.shape[0] > 0:
-        st.warning("Estas zonas no encuentran polígono en el GeoJSON:")
-        st.dataframe(unmatched_rows, use_container_width=True, hide_index=True)
-
-    map_df = map_df.loc[matched].copy()
+    map_df = map_df[map_df["ID_ZONA"].isin(geojson_id_set)].copy()
 
     if map_df.empty:
-        st.error(
-            "Después de validar IDs, no queda ninguna zona con geometría asociada. "
-            "Revisa el campo territorial del GeoJSON y el formato de ID_ZONA."
-        )
+        st.error("No hay coincidencias entre los IDs filtrados y el GeoJSON.")
         st.stop()
 
-    # Plotly documenta que el GeoJSON debe enlazarse con locations + featureidkey;
-    # aquí lo hacemos usando el campo detectado automáticamente dentro de properties.
     fig_map = px.choropleth_mapbox(
         map_df,
         geojson=geojson,
@@ -382,125 +632,272 @@ with tab1:
         hover_name="NOMBRE_ZONA",
         hover_data={
             "ID_ZONA": True,
-            "SCORE": ":.3f",
+            "CLUSTER_K4": True,
+            "SCORE_ESCENARIO": ":.2f",
             "RANK": True,
-            "POBLACION_KM2": ":.2f",
-            "INGRESO_MEDIANO_HOGAR": ":,.0f",
-            "MOV_CANTIDAD_ESTACIONES": ":.0f",
-            "MOVILIDAD_PROMEDIO_DIARIA": ":,.0f",
-            "ALQ_PRECIO_PIE2_ANUAL": ":.2f",
-            "DELITO_PROPIEDAD_KM2": ":.2f",
-            "COMPETENCIA_DIRECTA_KM2": ":.2f",
+            "SCORE_DIM_DEMANDA": ":.2f",
+            "SCORE_DIM_MOVILIDAD": ":.2f",
+            "SCORE_DIM_SEGURIDAD": ":.2f",
+            "SCORE_DIM_PUNTOS_INTERES": ":.2f",
+            "SCORE_DIM_COMPETENCIA": ":.2f",
+            "SCORE_DIM_COSTE": ":.2f",
         },
         mapbox_style="carto-positron",
         center={"lat": 40.7831, "lon": -73.9712},
         zoom=10.4,
-        opacity=0.72,
+        opacity=0.78,
     )
 
     fig_map.update_layout(
+        height=720,
         margin=dict(l=0, r=0, t=0, b=0),
-        height=700,
-        coloraxis_colorbar_title="Valor",
+        coloraxis_colorbar_title="Puntos",
     )
 
     st.plotly_chart(fig_map, use_container_width=True)
-    st.caption(f"Join usado en el mapa: ID_ZONA ↔ properties.{geo_field}")
+    st.caption(f"Join cartográfico: ID_ZONA ↔ properties.{geo_field}")
 
 
+# =========================================================
+# TAB RANKING
+# =========================================================
 with tab2:
-    st.subheader("Ranking de ubicaciones")
+    st.subheader("Top 10 zonas según filtros")
 
-    show_cols = ["RANK", "ID_ZONA", "NOMBRE_ZONA", "SCORE"] + selected_criteria
+    ranking_cols = [
+        "RANK",
+        "ID_ZONA",
+        "NOMBRE_ZONA",
+        "CLUSTER_K4",
+        "SCORE_ESCENARIO",
+        "SCORE_DIM_DEMANDA",
+        "SCORE_DIM_MOVILIDAD",
+        "SCORE_DIM_SEGURIDAD",
+        "SCORE_DIM_PUNTOS_INTERES",
+        "SCORE_DIM_COMPETENCIA",
+        "SCORE_DIM_COSTE",
+    ] + all_feature_cols
+
+    top10 = filtered[ranking_cols].head(10).copy()
+
     st.dataframe(
-        filtered[show_cols],
+        top10,
         use_container_width=True,
         hide_index=True,
     )
 
-    csv_download = filtered[show_cols].to_csv(index=False).encode("utf-8-sig")
+    csv_download = filtered[ranking_cols].to_csv(index=False).encode("utf-8-sig")
     st.download_button(
-        label="⬇️ Descargar ranking en CSV",
+        label="⬇️ Descargar ranking filtrado",
         data=csv_download,
-        file_name="ranking_site_selection.csv",
+        file_name="ranking_top_zonas_site_selection.csv",
         mime="text/csv",
     )
 
 
+# =========================================================
+# TAB GRÁFICOS
+# =========================================================
 with tab3:
-    st.subheader("Visualizaciones")
+    st.subheader("Gráficos de apoyo a la decisión")
 
-    top10 = filtered.head(10).copy()
-    top10["SCORE_TXT"] = top10["SCORE"].round(3)
+    # 1) Top 10 por score
+    top10_chart = filtered.head(10).copy()
+    top10_chart["score_txt"] = top10_chart["SCORE_ESCENARIO"].round(1)
 
-    fig_bar = px.bar(
-        top10.sort_values("SCORE", ascending=True),
-        x="SCORE",
+    fig_top10 = px.bar(
+        top10_chart.sort_values("SCORE_ESCENARIO", ascending=True),
+        x="SCORE_ESCENARIO",
         y="NOMBRE_ZONA",
         orientation="h",
-        text="SCORE_TXT",
-        color="SCORE",
-        title="Top 10 zonas por score",
+        text="score_txt",
+        color="SCORE_ESCENARIO",
+        title=f"Top 10 zonas por score - {scenario_name}",
     )
-    fig_bar.update_layout(height=500, margin=dict(l=0, r=0, t=50, b=0))
-    st.plotly_chart(fig_bar, use_container_width=True)
+    fig_top10.update_layout(height=500, margin=dict(l=0, r=0, t=50, b=0))
+    st.plotly_chart(fig_top10, use_container_width=True)
 
     col_a, col_b = st.columns(2)
 
+    # 2) Clustering k=4 provisional
     with col_a:
+        fig_cluster = px.scatter(
+            filtered,
+            x="PCA_1",
+            y="PCA_2",
+            color=filtered["CLUSTER_K4"].astype(str),
+            size="SCORE_ESCENARIO",
+            hover_name="NOMBRE_ZONA",
+            title="Clustering K=4 provisional",
+            labels={"color": "Cluster"},
+        )
+        fig_cluster.update_layout(height=460, margin=dict(l=0, r=0, t=50, b=0))
+        st.plotly_chart(fig_cluster, use_container_width=True)
+
+    # 3) Dispersión útil para lectura operativa
+    with col_b:
         fig_scatter = px.scatter(
             filtered,
             x="ALQ_PRECIO_PIE2_ANUAL",
             y="MOVILIDAD_PROMEDIO_DIARIA",
-            size="SCORE",
-            color="SCORE",
+            color="SCORE_ESCENARIO",
+            size="SCORE_ESCENARIO",
             hover_name="NOMBRE_ZONA",
-            title="Alquiler vs movilidad",
+            title="Alquiler vs movilidad promedio diaria",
         )
-        fig_scatter.update_layout(height=450, margin=dict(l=0, r=0, t=50, b=0))
+        fig_scatter.update_layout(height=460, margin=dict(l=0, r=0, t=50, b=0))
         st.plotly_chart(fig_scatter, use_container_width=True)
 
-    with col_b:
-        fig_hist = px.histogram(
-            filtered,
-            x="SCORE",
-            nbins=12,
-            title="Distribución del score",
-        )
-        fig_hist.update_layout(height=450, margin=dict(l=0, r=0, t=50, b=0))
-        st.plotly_chart(fig_hist, use_container_width=True)
+    # 4) Comparación por dimensiones para top 5
+    st.markdown("### Comparativa dimensional del Top 5")
+
+    dim_cols = [
+        "SCORE_DIM_DEMANDA",
+        "SCORE_DIM_MOVILIDAD",
+        "SCORE_DIM_SEGURIDAD",
+        "SCORE_DIM_PUNTOS_INTERES",
+        "SCORE_DIM_COMPETENCIA",
+        "SCORE_DIM_COSTE",
+    ]
+
+    top5_dims = filtered.head(5)[["NOMBRE_ZONA"] + dim_cols].copy()
+    rename_dim_cols = {
+        "SCORE_DIM_DEMANDA": "Demanda",
+        "SCORE_DIM_MOVILIDAD": "Movilidad",
+        "SCORE_DIM_SEGURIDAD": "Seguridad",
+        "SCORE_DIM_PUNTOS_INTERES": "Puntos de interés",
+        "SCORE_DIM_COMPETENCIA": "Competencia",
+        "SCORE_DIM_COSTE": "Coste",
+    }
+    top5_dims = top5_dims.rename(columns=rename_dim_cols)
+
+    dims_melt = top5_dims.melt(
+        id_vars="NOMBRE_ZONA",
+        var_name="Dimensión",
+        value_name="Puntuación",
+    )
+
+    fig_dims = px.bar(
+        dims_melt,
+        x="Dimensión",
+        y="Puntuación",
+        color="NOMBRE_ZONA",
+        barmode="group",
+        title="Desempeño por dimensiones del Top 5",
+    )
+    fig_dims.update_layout(height=520, margin=dict(l=0, r=0, t=50, b=0))
+    st.plotly_chart(fig_dims, use_container_width=True)
 
 
+# =========================================================
+# TAB METODOLOGÍA
+# =========================================================
 with tab4:
-    st.subheader("Metodología del modelo")
+    st.subheader("Metodología implementada en la app")
 
     st.markdown(
         """
-**Lógica del score**
+**1. Estructura general del scoring**
 
-Se calcula un score multicriterio ponderado:
+El modelo se organiza en dos niveles:
 
-\\[
-Score_i = \\sum_j w_j \\cdot x_{ij}^{norm}
-\\]
+- **Nivel micro**: las variables técnicas se ponderan dentro de cada dimensión.
+- **Nivel macro**: las dimensiones se combinan según el escenario de decisión.
 
-- Los criterios **benefit** premian valores altos.
-- Los criterios **cost** se invierten, para que valores bajos sean mejores.
-- Los pesos se normalizan automáticamente según la suma total elegida.
+La puntuación final se expresa en una escala de **0 a 100 puntos**.
 
-**Criterios benefit**
-- Densidad de población
-- Ingreso mediano
-- Cantidad de estaciones
-- Movilidad promedio diaria
+**2. Dimensiones del modelo**
 
-**Criterios cost**
-- Alquiler
-- Delito de propiedad
-- Competencia directa
+- Censo (Demanda)
+- Movilidad
+- Seguridad
+- Puntos de interés
+- Competencia
+- Coste
 
-**Lectura**
-- Un score más alto implica una zona más favorable según la ponderación seleccionada.
-- El ranking cambia en tiempo real al mover filtros o pesos.
+**3. Sentido de las variables**
+
+- **Sentido directo**: valores altos son más favorables.
+- **Sentido inverso**: valores altos son menos favorables.
+
+**4. Escenarios implementados**
+
+- **Potencial de demanda**
+- **Eficiencia y flujo**
+- **Viabilidad y riesgo**
 """
     )
+
+    st.markdown("### Pesos locales por dimensión")
+
+    rows = []
+    for dim_key, dim_meta in DIMENSIONS.items():
+        for var, var_meta in dim_meta["variables"].items():
+            rows.append(
+                {
+                    "Dimensión": dim_meta["label"],
+                    "Variable": var,
+                    "Etiqueta": var_meta["label"],
+                    "Peso local (%)": var_meta["weight"],
+                    "Sentido": var_meta["sense"],
+                }
+            )
+
+    local_weights_df = pd.DataFrame(rows)
+    st.dataframe(local_weights_df, use_container_width=True, hide_index=True)
+
+    st.markdown("### Escenarios y pesos macro")
+
+    scenario_rows = []
+    for sc_name, sc_meta in SCENARIOS.items():
+        for dim_key, weight in sc_meta["weights"].items():
+            scenario_rows.append(
+                {
+                    "Escenario": sc_name,
+                    "Dimensión": DIMENSIONS[dim_key]["label"],
+                    "Peso escenario (%)": weight,
+                    "Tipo": "Principal" if dim_key in sc_meta["main_dims"] else "Contexto",
+                }
+            )
+
+    scenario_df = pd.DataFrame(scenario_rows)
+    st.dataframe(scenario_df, use_container_width=True, hide_index=True)
+
+    st.markdown("### Fórmulas de lectura")
+
+    st.latex(r"ScoreVar_{i,j} = \left(\frac{x_{i,j}-\min(x_j)}{\max(x_j)-\min(x_j)}\right)\cdot 100")
+    st.markdown("Para variables de sentido directo.")
+
+    st.latex(r"ScoreVar_{i,j} = \left(\frac{\max(x_j)-x_{i,j}}{\max(x_j)-\min(x_j)}\right)\cdot 100")
+    st.markdown("Para variables de sentido inverso.")
+
+    st.latex(r"ScoreDim_{i,d} = \sum_j w_{j|d}\cdot ScoreVar_{i,j}")
+    st.latex(r"ScoreEscenario_{i,s} = \sum_d w_{d|s}\cdot ScoreDim_{i,d}")
+
+    st.info(
+        "El gráfico de clustering se muestra como una aproximación provisional con K-means (k=4). "
+        "Cuando tengas los clusters finales validados, puedes sustituir CLUSTER_K4 por la columna definitiva."
+    )
+
+
+# =========================================================
+# TAB DIAGNÓSTICO
+# =========================================================
+with tab5:
+    st.subheader("Diagnóstico técnico")
+
+    csv_id_set = set(df["ID_ZONA"].dropna().unique())
+    missing_in_geojson = sorted(csv_id_set - geojson_id_set)
+    missing_in_csv = sorted(geojson_id_set - csv_id_set)
+
+    st.write("Archivo GeoJSON cargado:", geojson_filename)
+    st.write("Campo detectado en GeoJSON:", geo_field)
+    st.write("Total IDs CSV:", len(csv_id_set))
+    st.write("Total IDs GeoJSON:", len(geojson_id_set))
+    st.write("IDs del CSV no encontrados en el GeoJSON:", missing_in_geojson[:25])
+    st.write("IDs del GeoJSON no encontrados en el CSV:", missing_in_csv[:25])
+
+    features = geojson.get("features", [])
+    if features:
+        st.write("Propiedades del primer feature:")
+        st.json(features[0].get("properties", {}))
