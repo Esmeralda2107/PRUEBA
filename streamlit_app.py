@@ -89,6 +89,14 @@ st.markdown(
         background-color: #f1f5f9;
         font-weight: 700;
     }
+    .custom-table thead tr:nth-child(1) th {
+        text-align: center !important;
+        background-color: #e2e8f0;
+    }
+    .custom-table thead tr:nth-child(2) th {
+        text-align: left !important;
+        background-color: #f1f5f9;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -103,40 +111,40 @@ DIMENSIONS = {
         "label": "Censo (Demanda)",
         "variables": {
             "POBLACION_KM2": {"label": "Población por km²", "weight": 30, "sense": "direct"},
-            "PORCENTAJE_HISPANOS": {"label": "Porcentaje hispanos", "weight": 30, "sense": "direct"},
-            "EDAD_MEDIANA": {"label": "Edad mediana", "weight": 10, "sense": "direct"},
+            "PORCENTAJE_HISPANOS": {"label": "Porcentaje hispanos", "weight": 20, "sense": "direct"},
+            "EDAD_MEDIANA": {"label": "Edad mediana", "weight": 15, "sense": "direct"},
             "INGRESO_MEDIANO_HOGAR": {"label": "Ingreso mediano del hogar", "weight": 20, "sense": "direct"},
-            "TAMANO_HOGAR_PROMEDIO": {"label": "Tamaño hogar promedio", "weight": 10, "sense": "direct"},
+            "TAMANO_HOGAR_PROMEDIO": {"label": "Tamaño hogar promedio", "weight": 15, "sense": "direct"},
         },
     },
     "MOVILIDAD": {
         "label": "Movilidad",
         "variables": {
-            "MOVILIDAD_PROMEDIO_DIARIA": {"label": "Movilidad promedio diaria", "weight": 70, "sense": "direct"},
-            "MOV_CANTIDAD_ESTACIONES": {"label": "Cantidad de estaciones", "weight": 30, "sense": "direct"},
+            "MOVILIDAD_PROMEDIO_DIARIA": {"label": "Movilidad promedio diaria", "weight": 60, "sense": "direct"},
+            "MOV_CANTIDAD_ESTACIONES": {"label": "Cantidad de estaciones", "weight": 40, "sense": "direct"},
         },
     },
     "SEGURIDAD": {
         "label": "Seguridad",
         "variables": {
-            "DELITO_PROPIEDAD_KM2": {"label": "Delito propiedad por km²", "weight": 40, "sense": "inverse"},
-            "DELITO_TRANSPORTE_KM2": {"label": "Delito transporte por km²", "weight": 40, "sense": "inverse"},
+            "DELITO_PROPIEDAD_KM2": {"label": "Delito propiedad por km²", "weight": 45, "sense": "inverse"},
+            "DELITO_TRANSPORTE_KM2": {"label": "Delito transporte por km²", "weight": 35, "sense": "inverse"},
             "DELITO_OTROS_KM2": {"label": "Otros delitos por km²", "weight": 20, "sense": "inverse"},
         },
     },
     "PUNTOS_INTERES": {
         "label": "Puntos de interés",
         "variables": {
-            "LUGARES_COMERCIO_KM2": {"label": "Lugares comercio por km²", "weight": 40, "sense": "direct"},
-            "LUGARES_OFICINAS_KM2": {"label": "Lugares oficinas por km²", "weight": 40, "sense": "direct"},
+            "LUGARES_COMERCIO_KM2": {"label": "Lugares comercio por km²", "weight": 35, "sense": "direct"},
+            "LUGARES_OFICINAS_KM2": {"label": "Lugares oficinas por km²", "weight": 45, "sense": "direct"},
             "LUGARES_RESIDENCIAL_KM2": {"label": "Lugares residencial por km²", "weight": 20, "sense": "direct"},
         },
     },
     "COMPETENCIA": {
         "label": "Competencia",
         "variables": {
-            "COMPETENCIA_DIRECTA_KM2": {"label": "Competencia directa por km²", "weight": 70, "sense": "inverse"},
-            "COMPETENCIA_INDIRECTA_KM2": {"label": "Competencia indirecta por km²", "weight": 30, "sense": "direct"},
+            "COMPETENCIA_DIRECTA_KM2": {"label": "Competencia directa por km²", "weight": 60, "sense": "inverse"},
+            "COMPETENCIA_INDIRECTA_KM2": {"label": "Competencia indirecta por km²", "weight": 40, "sense": "direct"},
         },
     },
     "COSTE": {
@@ -152,10 +160,10 @@ SCENARIOS = {
         "description": "Prioriza las dimensiones más vinculadas con la capacidad de atracción comercial de la zona.",
         "weights": {
             "DEMANDA": 35,
-            "PUNTOS_INTERES": 35,
-            "MOVILIDAD": 10,
+            "PUNTOS_INTERES": 25,
+            "MOVILIDAD": 15,
             "SEGURIDAD": 10,
-            "COSTE": 5,
+            "COSTE": 10,
             "COMPETENCIA": 5,
         },
         "main_dims": ["DEMANDA", "PUNTOS_INTERES"],
@@ -164,11 +172,11 @@ SCENARIOS = {
     "Eficiencia y flujo": {
         "description": "Da mayor peso a las condiciones urbanas más relevantes para un modelo fast casual orientado al take-away.",
         "weights": {
-            "MOVILIDAD": 40,
-            "PUNTOS_INTERES": 30,
-            "DEMANDA": 10,
+            "MOVILIDAD": 35,
+            "PUNTOS_INTERES": 25,
+            "DEMANDA": 15,
             "SEGURIDAD": 10,
-            "COSTE": 5,
+            "COSTE": 10,
             "COMPETENCIA": 5,
         },
         "main_dims": ["MOVILIDAD", "PUNTOS_INTERES"],
@@ -177,12 +185,12 @@ SCENARIOS = {
     "Viabilidad y riesgo": {
         "description": "Enfatiza los factores que inciden con mayor fuerza en la estabilidad operativa y económica de la implantación, así como en la saturación competitiva del entorno.",
         "weights": {
-            "SEGURIDAD": 25,
+            "SEGURIDAD": 20,
             "COSTE": 25,
-            "COMPETENCIA": 20,
-            "DEMANDA": 10,
+            "COMPETENCIA": 15,
+            "DEMANDA": 15,
             "MOVILIDAD": 10,
-            "PUNTOS_INTERES": 10,
+            "PUNTOS_INTERES": 15,
         },
         "main_dims": ["SEGURIDAD", "COSTE", "COMPETENCIA"],
         "context_dims": ["DEMANDA", "MOVILIDAD", "PUNTOS_INTERES"],
@@ -256,20 +264,28 @@ def score_0_100(series: pd.Series, sense: str = "direct") -> pd.Series:
 
 
 def classify_level(score):
-    if score >= 67:
+    if score >= 80:
+        return "Muy alto"
+    if score >= 60:
         return "Alto"
-    if score < 34:
+    if score >= 40:
+        return "Medio"
+    if score >= 20:
         return "Bajo"
-    return "Medio"
+    return "Muy bajo"
 
 
 def score_icon(score):
     level = classify_level(score)
-    if level == "Alto":
+    if level == "Muy alto":
         return "🟢"
+    if level == "Alto":
+        return "🟩"
+    if level == "Medio":
+        return "🟡"
     if level == "Bajo":
-        return "🔴"
-    return "🟡"
+        return "🟠"
+    return "🔴"
 
 
 def detect_geojson_id_field(geojson_dict):
@@ -467,6 +483,11 @@ def render_html_table(df):
     st.markdown(html, unsafe_allow_html=True)
 
 
+def render_html_table_multiindex(df):
+    html = '<div class="custom-table">' + df.to_html(index=False, escape=False) + "</div>"
+    st.markdown(html, unsafe_allow_html=True)
+
+
 def build_grouped_context(df, scenario_name):
     out = df[[
         "RANK", "ID_ZONA", "NOMBRE_ZONA", "CLUSTER_FILTER", "CLUSTER_DESC", "SCORE_ESCENARIO"
@@ -535,7 +556,7 @@ def build_grouped_subdimensions(df):
     for col in data_cols:
         base[col] = base[col].apply(lambda x: fmt_num(x, 2))
 
-    base.columns = pd.MultiIndex.from_tuples([("", "Rank"), ("", "Zona")] + col_tuples[2:])
+    base.columns = pd.MultiIndex.from_tuples(col_tuples)
     return base
 
 
@@ -644,7 +665,7 @@ st.sidebar.markdown(
 
 st.sidebar.markdown("### Ajuste de pesos")
 st.sidebar.caption(
-    "En cada escenario, las dimensiones principales concentran el 70% del peso total y las dimensiones de contexto el 30%. "
+    "En cada escenario, las dimensiones principales concentran el 60% del peso total y las dimensiones de contexto el 40%. "
     "Puedes modificar una dimensión dentro de cada bloque, y la aplicación reajusta automáticamente las demás para conservar esa lógica."
 )
 
@@ -661,7 +682,7 @@ main_selected = st.sidebar.selectbox(
 )
 
 main_min = 15
-main_max = 70 - (len(main_dims) - 1) * main_min
+main_max = 60 - (len(main_dims) - 1) * main_min
 
 main_selected_value = st.sidebar.slider(
     f"Peso de {DIMENSIONS[main_selected]['label']} (%)",
@@ -676,7 +697,7 @@ main_weights = allocate_remaining(
     selected_dim=main_selected,
     selected_value=main_selected_value,
     dims=main_dims,
-    total=70,
+    total=60,
     min_each=main_min,
     base_weights=main_defaults,
 )
@@ -698,7 +719,7 @@ context_selected = st.sidebar.selectbox(
 )
 
 context_min = 5
-context_max = 30 - (len(context_dims) - 1) * context_min
+context_max = 40 - (len(context_dims) - 1) * context_min
 default_context_value = int(context_defaults[context_selected])
 default_context_value = max(context_min, min(default_context_value, context_max))
 
@@ -715,7 +736,7 @@ context_weights = allocate_remaining(
     selected_dim=context_selected,
     selected_value=context_selected_value,
     dims=context_dims,
-    total=30,
+    total=40,
     min_each=context_min,
     base_weights=context_defaults,
 )
@@ -913,7 +934,7 @@ with tab1:
     summary_lines = []
     for item in dimension_summary:
         summary_lines.append(
-            f"- **{item['dimension']}**: {item['level']} ({item['score']:.1f}/100). "
+            f"- **{item['dimension']}**: {classify_level(item['score'])} ({item['score']:.1f}/100). "
             f"Subdimensión más representativa: **{item['best_subdim']}**."
         )
 
@@ -941,7 +962,7 @@ with tab2:
     render_html_table(build_grouped_dimensions(filtered))
 
     st.markdown('<div class="group-title">Subdimensiones</div>', unsafe_allow_html=True)
-    render_html_table(build_grouped_subdimensions(filtered))
+    render_html_table_multiindex(build_grouped_subdimensions(filtered))
 
     csv_download = filtered.to_csv(index=False).encode("utf-8-sig")
     st.download_button(
@@ -1092,9 +1113,19 @@ with tab4:
 - **Sentido inverso**: valores altos representan una condición desfavorable para el negocio, por lo que reciben puntuaciones más bajas.
 
 **Regla macro**
-- Dimensiones principales: **70 %**
-- Dimensiones de contexto: **30 %**
+- Dimensiones principales: **60 %**
+- Dimensiones de contexto: **40 %**
 - La app permite modificar la dimensión elegida en cada bloque y reajusta automáticamente las demás para conservar la estructura.
+
+**Interpretación de categorías**
+- **Muy alto**: 80 a 100
+- **Alto**: 60 a 79.99
+- **Medio**: 40 a 59.99
+- **Bajo**: 20 a 39.99
+- **Muy bajo**: 0 a 19.99
+
+Estas categorías se aplican sobre la **puntuación transformada (0–100)** y no sobre el valor bruto de la variable.  
+Por eso, una variable de **sentido inverso** puede tener un valor bruto alto y aun así recibir una puntuación baja. En consecuencia, una categoría alta indica mejor desempeño **dentro del modelo de scoring**, no necesariamente un valor bruto alto en el dato original.
 
 **Dimensiones**
 - Censo (Demanda)
