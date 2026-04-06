@@ -269,21 +269,24 @@ def clean_zone_id(value):
     return str(value).strip().upper()
 
 
-def score_0_100(series: pd.Series, sense: str = "direct") -> pd.Series:
+def score_0_100_percentile(series: pd.Series, sense: str = "direct") -> pd.Series:
     s = pd.to_numeric(series, errors="coerce")
     s = s.fillna(s.median())
-    min_v = s.min()
-    max_v = s.max()
 
-    if max_v == min_v:
+    p5 = s.quantile(0.05)
+    p95 = s.quantile(0.95)
+
+    if pd.isna(p5) or pd.isna(p95) or p95 == p5:
         return pd.Series(50.0, index=s.index)
 
-    if sense == "direct":
-        out = ((s - min_v) / (max_v - min_v)) * 100
-    else:
-        out = ((max_v - s) / (max_v - min_v)) * 100
+    s_clipped = s.clip(lower=p5, upper=p95)
 
-    return out.round(2)
+    if sense == "direct":
+        out = ((s_clipped - p5) / (p95 - p5)) * 100
+    else:
+        out = ((p95 - s_clipped) / (p95 - p5)) * 100
+
+    return out.clip(0, 100).round(2)
 
 
 def classify_level(score):
@@ -382,7 +385,7 @@ def compute_dimension_scores(df):
             score_col = f"SCORE_VAR_{var}"
             contrib_col = f"CONTRIB_DIMVAR_{var}"
 
-            out[score_col] = score_0_100(out[var], var_meta["sense"])
+            out[score_col] = score_0_100_percentile(out[var], var_meta["sense"])
             out[contrib_col] = out[score_col] * (var_meta["weight"] / 100)
             contrib_cols.append(contrib_col)
 
@@ -1330,9 +1333,12 @@ with tab4:
 - Nivel macro: combinación de dimensiones según el escenario de decisión.
 - Escala final: 0 a 100 puntos.
 
-**Sentido de las variables**
-- **Sentido directo**: valores altos representan una condición favorable para el negocio, por lo que reciben puntuaciones más altas.
-- **Sentido inverso**: valores altos representan una condición desfavorable para el negocio, por lo que reciben puntuaciones más bajas.
+**Metodología de normalización**
+- Para la construcción del scoring, las variables se reexpresan en una escala común de 0 a 100 puntos.
+- Con el fin de reducir la influencia de valores extremos, se utilizan como límites de referencia los **percentiles 5 y 95** de la distribución de cada variable.
+- Los valores inferiores al percentil 5 se acotan al límite inferior y los superiores al percentil 95 se acotan al límite superior antes de calcular la puntuación.
+- **Sentido directo**: valores más altos reciben puntuaciones más cercanas a 100.
+- **Sentido inverso**: valores más altos reciben puntuaciones más cercanas a 0.
 
 **Regla macro**
 - Dimensiones principales: **60 %**
@@ -1352,16 +1358,6 @@ En dimensiones de sentido inverso, una puntuación alta indica una condición re
 - **Seguridad**: menor exposición relativa al riesgo.
 - **Coste**: menor nivel relativo de alquiler.
 - **Competencia**: menor presión competitiva relativa.
-
-**Significado de los símbolos en las fórmulas**
-- **i**: zona analizada o NTA.
-- **j**: variable o subdimensión.
-- **d**: dimensión.
-- **s**: escenario.
-- **xᵢⱼ**: valor bruto observado de la variable *j* en la zona *i*.
-- **min(xⱼ)** y **max(xⱼ)**: mínimo y máximo observados para la variable *j* en el conjunto de zonas.
-- **wⱼ|d**: peso local de la variable *j* dentro de la dimensión *d*.
-- **w_d|s**: peso macro de la dimensión *d* dentro del escenario *s*.
 
 **Dimensiones**
 - Censo (Demanda)
@@ -1411,12 +1407,28 @@ En dimensiones de sentido inverso, una puntuación alta indica una condición re
     )
 
     st.markdown("### Fórmulas")
-    st.latex(r"ScoreVar_{i,j} = \left(\frac{x_{i,j}-\min(x_j)}{\max(x_j)-\min(x_j)}\right)\cdot 100")
+    st.latex(r"ScoreVar_{i,j} = \left(\frac{x^{*}_{i,j}-P5_j}{P95_j-P5_j}\right)\cdot 100")
     st.markdown("Para variables de sentido directo.")
-    st.latex(r"ScoreVar_{i,j} = \left(\frac{\max(x_j)-x_{i,j}}{\max(x_j)-\min(x_j)}\right)\cdot 100")
+    st.latex(r"ScoreVar_{i,j} = \left(\frac{P95_j-x^{*}_{i,j}}{P95_j-P5_j}\right)\cdot 100")
     st.markdown("Para variables de sentido inverso.")
     st.latex(r"ScoreDim_{i,d} = \sum_j w_{j|d}\cdot ScoreVar_{i,j}")
     st.latex(r"ScoreEscenario_{i,s} = \sum_d w_{d|s}\cdot ScoreDim_{i,d}")
+
+    st.markdown("### Leyenda de fórmulas")
+    st.markdown(
+        """
+- **i**: zona analizada o NTA.
+- **j**: variable o subdimensión.
+- **d**: dimensión.
+- **s**: escenario.
+- **xᵢⱼ**: valor bruto observado de la variable *j* en la zona *i*.
+- **x*ᵢⱼ**: valor acotado de la variable entre los percentiles 5 y 95.
+- **P5ⱼ**: percentil 5 de la distribución de la variable *j*.
+- **P95ⱼ**: percentil 95 de la distribución de la variable *j*.
+- **wⱼ|d**: peso local de la variable *j* dentro de la dimensión *d*.
+- **w_d|s**: peso macro de la dimensión *d* dentro del escenario *s*.
+"""
+    )
 
 
 # =========================================================
