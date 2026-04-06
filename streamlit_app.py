@@ -1323,6 +1323,9 @@ with tab3:
 # =========================================================
 # TAB METODOLOGÍA
 # =========================================================
+# =========================================================
+# TAB METODOLOGÍA
+# =========================================================
 with tab4:
     st.subheader("Metodología implementada")
 
@@ -1334,11 +1337,11 @@ with tab4:
 - Escala final: 0 a 100 puntos.
 
 **Metodología de normalización**
-- Para la construcción del scoring, las variables se reexpresan en una escala común de 0 a 100 puntos.
-- Con el fin de reducir la influencia de valores extremos, se utilizan como límites de referencia los **percentiles 5 y 95** de la distribución de cada variable.
-- Los valores inferiores al percentil 5 se acotan al percentil 5 y los valores superiores al percentil 95 se acotan al percentil 95 antes de calcular la puntuación.
-- **Sentido directo**: valores más altos reciben puntuaciones más cercanas a 100.
-- **Sentido inverso**: valores más altos reciben puntuaciones más cercanas a 0.
+- Para la construcción del scoring, las variables se transforman a una escala común de 0 a 100 puntos.
+- Con el fin de reducir la influencia de valores extremos, se emplean los **percentiles 5 y 95** como límites de referencia de cada variable.
+- Los valores inferiores al percentil 5 se tratan como el límite inferior y los valores superiores al percentil 95 como el límite superior dentro de la transformación.
+- En variables de **sentido directo**, valores más altos implican puntuaciones más altas.
+- En variables de **sentido inverso**, valores más altos implican puntuaciones más bajas.
 
 **Regla macro**
 - Dimensiones principales: **60 %**
@@ -1407,15 +1410,23 @@ En dimensiones de sentido inverso, una puntuación alta indica una condición re
     )
 
     st.markdown("### Fórmulas")
-    st.latex(r"ScoreVar_{i,j} = \left(\frac{x^{clip}_{i,j}-P5_j}{P95_j-P5_j}\right)\cdot 100")
-    st.markdown("Para variables de sentido directo.")
 
-    st.latex(r"ScoreVar_{i,j} = \left(\frac{P95_j-x^{clip}_{i,j}}{P95_j-P5_j}\right)\cdot 100")
-    st.markdown("Para variables de sentido inverso.")
+    st.markdown("**La transformación aplicada fue la siguiente:**")
 
-    st.latex(r"ScoreDim_{i,d} = \sum_j w_{j|d}\cdot ScoreVar_{i,j}")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**Para variables de sentido directo:**")
+        st.latex(r"Score_{ij} = 100 \times \frac{x_{ij} - P5(x_j)}{P95(x_j) - P5(x_j)}")
 
-    st.latex(r"ScoreEscenario_{i,s} = \sum_d w_{d|s}\cdot ScoreDim_{i,d}")
+    with c2:
+        st.markdown("**Para variables de sentido inverso:**")
+        st.latex(r"Score_{ij} = 100 \times \frac{P95(x_j) - x_{ij}}{P95(x_j) - P5(x_j)}")
+
+    st.markdown("**La expresión utilizada para la dimensión fue la siguiente:**")
+    st.latex(r"D_{id} = \sum_{j=1}^{n} w_{jd} \cdot Score_{ij}")
+
+    st.markdown("**La expresión utilizada para el escenario fue la siguiente:**")
+    st.latex(r"ScoreEscenario_{is} = \sum_{d=1}^{m} w_{ds} \cdot D_{id}")
 
     st.markdown("### Leyenda de fórmulas")
     st.markdown(
@@ -1424,15 +1435,16 @@ En dimensiones de sentido inverso, una puntuación alta indica una condición re
 - **j**: variable o subdimensión.
 - **d**: dimensión.
 - **s**: escenario.
-- **xᵢⱼ**: valor bruto observado de la variable *j* en la zona *i*.
-- **xᶜˡⁱᵖᵢⱼ**: valor de la variable *j* en la zona *i*, acotado entre los percentiles 5 y 95.
-- **P5ⱼ**: percentil 5 de la distribución de la variable *j*.
-- **P95ⱼ**: percentil 95 de la distribución de la variable *j*.
-- **wⱼ|d**: peso local de la variable *j* dentro de la dimensión *d*.
-- **w_d|s**: peso macro de la dimensión *d* dentro del escenario *s*.
+- **xᵢⱼ**: valor observado de la variable *j* en la zona *i*.
+- **P5(xⱼ)**: percentil 5 de la distribución de la variable *j*.
+- **P95(xⱼ)**: percentil 95 de la distribución de la variable *j*.
+- **Scoreᵢⱼ**: puntuación normalizada de la zona *i* en la variable *j*.
+- **wⱼd**: peso local de la variable *j* dentro de la dimensión *d*.
+- **Dᵢd**: puntuación de la zona *i* en la dimensión *d*.
+- **wds**: peso de la dimensión *d* dentro del escenario *s*.
+- **ScoreEscenarioᵢs**: puntuación de la zona *i* en el escenario *s*.
 """
     )
-
 
 # =========================================================
 # TAB LIMITACIONES
