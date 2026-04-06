@@ -97,6 +97,21 @@ st.markdown(
         text-align: left !important;
         background-color: #f1f5f9;
     }
+    .chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 8px 0 14px 0;
+    }
+    .chip {
+        background: #f1f5f9;
+        color: #0f172a;
+        border: 1px solid #cbd5e1;
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-size: 0.85rem;
+        white-space: nowrap;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -238,6 +253,14 @@ def metric_card(title, value, subtitle=""):
         """,
         unsafe_allow_html=True,
     )
+
+
+def render_chips(items):
+    html = '<div class="chip-row">'
+    for item in items:
+        html += f'<span class="chip">{item}</span>'
+    html += "</div>"
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def clean_zone_id(value):
@@ -547,7 +570,13 @@ def build_grouped_subdimensions(df):
     return base
 
 
-def allocate_remaining(selected_dim, selected_value, dims, total, min_each, base_weights):
+def compute_feasible_bounds(total, dims_count, min_each, max_each):
+    lower = max(min_each, total - (dims_count - 1) * max_each)
+    upper = min(max_each, total - (dims_count - 1) * min_each)
+    return lower, upper
+
+
+def allocate_remaining(selected_dim, selected_value, dims, total, min_each, max_each, base_weights):
     remaining_dims = [d for d in dims if d != selected_dim]
     remaining_total = total - selected_value
 
@@ -555,35 +584,62 @@ def allocate_remaining(selected_dim, selected_value, dims, total, min_each, base
         return {selected_dim: selected_value}
 
     weights = {d: min_each for d in remaining_dims}
-    extra = remaining_total - (min_each * len(remaining_dims))
+    extra_capacity = {d: max_each - min_each for d in remaining_dims}
+    base_pref = {d: max(base_weights[d] - min_each, 1) for d in remaining_dims}
 
-    if extra < 0:
-        extra = 0
+    remaining_points = remaining_total - len(remaining_dims) * min_each
+    assigned_extra = {d: 0 for d in remaining_dims}
 
-    base = {d: max(base_weights[d] - min_each, 0) for d in remaining_dims}
-    base_sum = sum(base.values())
+    while remaining_points > 0:
+        eligible = [d for d in remaining_dims if assigned_extra[d] < extra_capacity[d]]
+        if not eligible:
+            break
+        chosen = max(eligible, key=lambda d: base_pref[d] / (assigned_extra[d] + 1))
+        assigned_extra[chosen] += 1
+        remaining_points -= 1
 
-    if base_sum == 0:
-        shares = {d: 1 / len(remaining_dims) for d in remaining_dims}
-    else:
-        shares = {d: base[d] / base_sum for d in remaining_dims}
+    final_weights = {selected_dim: selected_value}
+    for d in remaining_dims:
+        final_weights[d] = min_each + assigned_extra[d]
 
-    distributed = {}
-    assigned = 0
-    for idx, d in enumerate(remaining_dims):
-        if idx == len(remaining_dims) - 1:
-            add = extra - assigned
-        else:
-            add = round(extra * shares[d])
-            assigned += add
-        distributed[d] = min_each + add
-
-    final_weights = {selected_dim: selected_value, **distributed}
     diff = total - sum(final_weights.values())
-    last_key = remaining_dims[-1] if remaining_dims else selected_dim
-    final_weights[last_key] += diff
+    if diff != 0:
+        adjustable = [d for d in remaining_dims if final_weights[d] + diff <= max_each and final_weights[d] + diff >= min_each]
+        if adjustable:
+            final_weights[adjustable[-1]] += diff
 
     return final_weights
+
+
+def init_filter_state(scenario_scored, all_clusters):
+    defaults = {
+        "filter_score_range": (
+            float(scenario_scored["SCORE_ESCENARIO"].min()),
+            float(scenario_scored["SCORE_ESCENARIO"].max()),
+        ),
+        "filter_rent_range": (
+            float(scenario_scored["ALQ_PRECIO_PIE2_ANUAL"].min()),
+            float(scenario_scored["ALQ_PRECIO_PIE2_ANUAL"].max()),
+        ),
+        "filter_competition_range": (
+            float(scenario_scored["COMPETENCIA_DIRECTA_KM2"].min()),
+            float(scenario_scored["COMPETENCIA_DIRECTA_KM2"].max()),
+        ),
+        "filter_mobility_range": (
+            float(scenario_scored["MOVILIDAD_PROMEDIO_DIARIA"].min()),
+            float(scenario_scored["MOVILIDAD_PROMEDIO_DIARIA"].max()),
+        ),
+        "filter_zones": sorted(scenario_scored["NOMBRE_ZONA"].dropna().unique().tolist()),
+        "filter_clusters": sorted(all_clusters),
+    }
+
+    scenario_changed = st.session_state.get("active_scenario_for_filters") != scenario_name
+    if scenario_changed:
+        for k, v in defaults.items():
+            st.session_state[k] = v
+        st.session_state["active_scenario_for_filters"] = scenario_name
+
+    return defaults
 
 
 def top_vars_for_dimension(row, dim_key, n=2):
@@ -637,7 +693,6 @@ def mobility_summary_text(row):
 
 
 def security_summary_text(row):
-    dim_score = row["SCORE_DIM_SEGURIDAD"]
     top_item = top_vars_for_dimension(row, "SEGURIDAD", n=1)[0]
     return (
         f"Lo que indica una menor exposición relativa al riesgo dentro del conjunto analizado. "
@@ -661,7 +716,6 @@ def competition_summary_text(row):
     worse = "competencia directa" if indirect >= direct else "competencia indirecta"
 
     dim_score = row["SCORE_DIM_COMPETENCIA"]
-    level = classify_level(dim_score)
 
     if dim_score >= 60:
         intro = "Lo que indica una presión competitiva relativamente más moderada dentro del modelo."
@@ -670,9 +724,7 @@ def competition_summary_text(row):
     else:
         intro = "Lo que indica una presión competitiva relativamente más exigente dentro del modelo."
 
-    return (
-        f"{intro} La dimensión muestra mejor desempeño en {better} que en {worse}."
-    )
+    return f"{intro} La dimensión muestra mejor desempeño en {better} que en {worse}."
 
 
 def cost_summary_text(row):
@@ -778,9 +830,20 @@ st.sidebar.caption(
     "Puedes modificar una dimensión dentro de cada bloque, y la aplicación reajusta automáticamente las demás para conservar esa lógica."
 )
 
+# PRINCIPALES
 st.sidebar.markdown("**Dimensiones principales**")
 main_dims = scenario["main_dims"]
 main_defaults = {d: scenario["weights"][d] for d in main_dims}
+
+requested_main_min = 21
+if len(main_dims) * requested_main_min > 60:
+    main_min = 60 // len(main_dims)
+    st.sidebar.info(
+        f"En este escenario, el mínimo técnico por dimensión principal se ajusta a {main_min}% "
+        f"porque hay {len(main_dims)} dimensiones principales dentro del bloque del 60%."
+    )
+else:
+    main_min = requested_main_min
 
 main_selected = st.sidebar.selectbox(
     "Dimensión principal a modificar",
@@ -789,14 +852,21 @@ main_selected = st.sidebar.selectbox(
     key=f"main_selected_{scenario_name}",
 )
 
-main_min = 15
-main_max = 60 - (len(main_dims) - 1) * main_min
+main_lower, main_upper = compute_feasible_bounds(
+    total=60,
+    dims_count=len(main_dims),
+    min_each=main_min,
+    max_each=60,
+)
+
+main_default_value = int(main_defaults[main_selected])
+main_default_value = max(main_lower, min(main_default_value, main_upper))
 
 main_selected_value = st.sidebar.slider(
     f"Peso de {DIMENSIONS[main_selected]['label']} (%)",
-    min_value=main_min,
-    max_value=main_max,
-    value=int(main_defaults[main_selected]),
+    min_value=main_lower,
+    max_value=main_upper,
+    value=main_default_value,
     step=1,
     key=f"main_slider_{scenario_name}_{main_selected}",
 )
@@ -807,6 +877,7 @@ main_weights = allocate_remaining(
     dims=main_dims,
     total=60,
     min_each=main_min,
+    max_each=60,
     base_weights=main_defaults,
 )
 
@@ -814,9 +885,12 @@ for d in main_dims:
     if d != main_selected:
         st.sidebar.info(f"{DIMENSIONS[d]['label']}: {main_weights[d]}% (ajuste automático)")
 
+# CONTEXTO
 st.sidebar.markdown("**Dimensiones de contexto**")
 context_dims = scenario["context_dims"]
 context_defaults = {d: scenario["weights"][d] for d in context_dims}
+context_min = 5
+context_max = 20
 
 context_selected = st.sidebar.selectbox(
     "Dimensión de contexto a modificar",
@@ -825,16 +899,21 @@ context_selected = st.sidebar.selectbox(
     key=f"context_selected_{scenario_name}",
 )
 
-context_min = 5
-context_max = 40 - (len(context_dims) - 1) * context_min
-default_context_value = int(context_defaults[context_selected])
-default_context_value = max(context_min, min(default_context_value, context_max))
+context_lower, context_upper = compute_feasible_bounds(
+    total=40,
+    dims_count=len(context_dims),
+    min_each=context_min,
+    max_each=context_max,
+)
+
+context_default_value = int(context_defaults[context_selected])
+context_default_value = max(context_lower, min(context_default_value, context_upper))
 
 context_selected_value = st.sidebar.slider(
     f"Peso de {DIMENSIONS[context_selected]['label']} (%)",
-    min_value=context_min,
-    max_value=context_max,
-    value=default_context_value,
+    min_value=context_lower,
+    max_value=context_upper,
+    value=context_default_value,
     step=1,
     key=f"context_slider_{scenario_name}_{context_selected}",
 )
@@ -845,6 +924,7 @@ context_weights = allocate_remaining(
     dims=context_dims,
     total=40,
     min_each=context_min,
+    max_each=context_max,
     base_weights=context_defaults,
 )
 
@@ -855,59 +935,56 @@ for d in context_dims:
 effective_weights = {**main_weights, **context_weights}
 scenario_scored = compute_scenario_scores(df, effective_weights)
 
+# FILTROS
 st.sidebar.markdown("### Filtros")
+
+all_cluster_options = sorted(df["CLUSTER_FILTER"].dropna().unique().tolist())
+defaults = init_filter_state(scenario_scored, all_cluster_options)
 
 score_range = st.sidebar.slider(
     "Score del escenario (0–100)",
     min_value=0.0,
     max_value=100.0,
-    value=(
-        float(scenario_scored["SCORE_ESCENARIO"].min()),
-        float(scenario_scored["SCORE_ESCENARIO"].max()),
-    ),
+    key="filter_score_range",
 )
 
 rent_range = st.sidebar.slider(
     "Alquiler (USD/pie²/año)",
     min_value=float(scenario_scored["ALQ_PRECIO_PIE2_ANUAL"].min()),
     max_value=float(scenario_scored["ALQ_PRECIO_PIE2_ANUAL"].max()),
-    value=(
-        float(scenario_scored["ALQ_PRECIO_PIE2_ANUAL"].min()),
-        float(scenario_scored["ALQ_PRECIO_PIE2_ANUAL"].max()),
-    ),
+    key="filter_rent_range",
 )
 
 competition_range = st.sidebar.slider(
     "Competencia directa (competidores/km²)",
     min_value=float(scenario_scored["COMPETENCIA_DIRECTA_KM2"].min()),
     max_value=float(scenario_scored["COMPETENCIA_DIRECTA_KM2"].max()),
-    value=(
-        float(scenario_scored["COMPETENCIA_DIRECTA_KM2"].min()),
-        float(scenario_scored["COMPETENCIA_DIRECTA_KM2"].max()),
-    ),
+    key="filter_competition_range",
 )
 
 mobility_range = st.sidebar.slider(
     "Movilidad (promedio diario de personas)",
     min_value=float(scenario_scored["MOVILIDAD_PROMEDIO_DIARIA"].min()),
     max_value=float(scenario_scored["MOVILIDAD_PROMEDIO_DIARIA"].max()),
-    value=(
-        float(scenario_scored["MOVILIDAD_PROMEDIO_DIARIA"].min()),
-        float(scenario_scored["MOVILIDAD_PROMEDIO_DIARIA"].max()),
-    ),
+    key="filter_mobility_range",
 )
 
 selected_zones = st.sidebar.multiselect(
     "Zonas",
     options=sorted(scenario_scored["NOMBRE_ZONA"].dropna().unique().tolist()),
-    default=sorted(scenario_scored["NOMBRE_ZONA"].dropna().unique().tolist()),
+    key="filter_zones",
 )
 
 selected_clusters = st.sidebar.multiselect(
     "Clusters",
-    options=sorted(df["CLUSTER_FILTER"].dropna().unique().tolist()),
-    default=sorted(df["CLUSTER_FILTER"].dropna().unique().tolist()),
+    options=all_cluster_options,
+    key="filter_clusters",
 )
+
+if st.sidebar.button("Restablecer filtros", use_container_width=True):
+    for k, v in defaults.items():
+        st.session_state[k] = v
+    st.rerun()
 
 filtered = scenario_scored[
     scenario_scored["SCORE_ESCENARIO"].between(score_range[0], score_range[1])
@@ -928,6 +1005,23 @@ filtered["RANK"] = filtered["SCORE_ESCENARIO"].rank(ascending=False, method="den
 best_zone = filtered.iloc[0]
 top_subdims = get_top_subdimensions(best_zone, top_n=3)
 top_subdim_text = " · ".join([x["label"] for x in top_subdims])
+
+
+# =========================================================
+# CHIPS / RESUMEN DE FILTROS ACTIVOS
+# =========================================================
+excluded_clusters = [c for c in all_cluster_options if c not in selected_clusters]
+excluded_clusters_text = ", ".join(excluded_clusters) if excluded_clusters else "ninguno"
+
+chips = [
+    f"Escenario: {scenario_name}",
+    f"Score mínimo: {fmt_num(score_range[0], 0)}",
+    f"Renta máxima: {fmt_num(rent_range[1], 2)}",
+    f"Competencia directa máxima: {fmt_num(competition_range[1], 2)}",
+    f"Clusters excluidos: {excluded_clusters_text}",
+    f"{len(filtered)} zonas visibles",
+]
+render_chips(chips)
 
 
 # =========================================================
@@ -967,8 +1061,8 @@ with c4:
 # =========================================================
 # TABS
 # =========================================================
-tab1, tab2, tab3, tab4 = st.tabs(
-    ["🗺️ Mapa", "🏆 Ranking", "📊 Gráficos", "📘 Metodología"]
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    ["🗺️ Mapa", "🏆 Ranking", "📊 Gráficos", "📘 Metodología", "⚠️ Limitaciones del modelo"]
 )
 
 
@@ -1292,3 +1386,22 @@ En dimensiones de sentido inverso, una puntuación alta indica una condición re
     st.markdown("Para variables de sentido inverso.")
     st.latex(r"ScoreDim_{i,d} = \sum_j w_{j|d}\cdot ScoreVar_{i,j}")
     st.latex(r"ScoreEscenario_{i,s} = \sum_d w_{d|s}\cdot ScoreDim_{i,d}")
+
+
+# =========================================================
+# TAB LIMITACIONES
+# =========================================================
+with tab5:
+    st.subheader("Limitaciones del modelo")
+
+    st.markdown(
+        """
+- El análisis se limita a Manhattan y a las NTA como unidad territorial, por lo que no evalúa ubicaciones puntuales.
+- El modelo simplifica la realidad y se basa en variables proxy según la disponibilidad de datos.
+- Los resultados son relativos al conjunto de zonas analizadas, por lo que un score alto no implica una condición óptima absoluta.
+- La recomendación depende de los pesos asignados en cada escenario, por lo que el ranking puede variar.
+- El modelo depende de la calidad, actualización y homogeneidad de las fuentes utilizadas.
+- No incorpora factores cualitativos y operativos clave, por lo que no sustituye la validación en campo.
+- La recomendación obtenida no garantiza el éxito comercial del negocio.
+"""
+    )
