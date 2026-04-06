@@ -1336,14 +1336,14 @@ with tab4:
 **Metodología de normalización**
 - Para la construcción del scoring, las variables se reexpresan en una escala común de 0 a 100 puntos.
 - Con el fin de reducir la influencia de valores extremos, se utilizan como límites de referencia los **percentiles 5 y 95** de la distribución de cada variable.
-- Los valores inferiores al percentil 5 se asignan al límite inferior de la escala y los valores superiores al percentil 95 se asignan al límite superior.
+- Los valores inferiores al percentil 5 se acotan al percentil 5 y los valores superiores al percentil 95 se acotan al percentil 95 antes de calcular la puntuación.
 - **Sentido directo**: valores más altos reciben puntuaciones más cercanas a 100.
 - **Sentido inverso**: valores más altos reciben puntuaciones más cercanas a 0.
 
 **Regla macro**
 - Dimensiones principales: **60 %**
 - Dimensiones de contexto: **40 %**
-- La app permite modificar varias dimensiones de forma acumulativa dentro de cada bloque y reajusta automáticamente las demás para conservar la estructura.
+- La app permite modificar varias dimensiones de forma acumulativa dentro de cada bloque y reajusta automáticamente las demás para conservar esa lógica.
 
 **Interpretación de categorías**
 - **Muy alta**: 85 a 100
@@ -1416,22 +1416,22 @@ En dimensiones de sentido inverso, una puntuación alta indica una condición re
     st.latex(r"ScoreDim_{i,d} = \sum_j w_{j|d}\cdot ScoreVar_{i,j}")
 
     st.latex(r"ScoreEscenario_{i,s} = \sum_d w_{d|s}\cdot ScoreDim_{i,d}")
-    
+
     st.markdown("### Leyenda de fórmulas")
     st.markdown(
-            """
+        """
 - **i**: zona analizada o NTA.
- - **j**: variable o subdimensión.
+- **j**: variable o subdimensión.
 - **d**: dimensión.
- - **s**: escenario.
+- **s**: escenario.
 - **xᵢⱼ**: valor bruto observado de la variable *j* en la zona *i*.
 - **xᶜˡⁱᵖᵢⱼ**: valor de la variable *j* en la zona *i*, acotado entre los percentiles 5 y 95.
 - **P5ⱼ**: percentil 5 de la distribución de la variable *j*.
 - **P95ⱼ**: percentil 95 de la distribución de la variable *j*.
 - **wⱼ|d**: peso local de la variable *j* dentro de la dimensión *d*.
 - **w_d|s**: peso macro de la dimensión *d* dentro del escenario *s*.
-    """
-     )
+"""
+    )
 
 
 # =========================================================
