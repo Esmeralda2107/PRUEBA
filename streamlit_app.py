@@ -1406,6 +1406,21 @@ En dimensiones de sentido inverso, una puntuación alta indica una condición re
 """
     )
 
+     st.markdown(
+            """
+    - **i**: zona analizada o NTA.
+    - **j**: variable o subdimensión.
+    - **d**: dimensión.
+    - **s**: escenario.
+    - **xᵢⱼ**: valor bruto observado de la variable *j* en la zona *i*.
+    - **xᶜˡⁱᵖᵢⱼ**: valor de la variable *j* en la zona *i*, acotado entre los percentiles 5 y 95.
+    - **P5ⱼ**: percentil 5 de la distribución de la variable *j*.
+    - **P95ⱼ**: percentil 95 de la distribución de la variable *j*.
+    - **wⱼ|d**: peso local de la variable *j* dentro de la dimensión *d*.
+    - **w_d|s**: peso macro de la dimensión *d* dentro del escenario *s*.
+    """
+        )
+
     st.markdown("### Fórmulas")
     st.latex(r"ScoreVar_{i,j} = \left(\frac{x^{clip}_{i,j}-P5_j}{P95_j-P5_j}\right)\cdot 100")
     st.markdown("Para variables de sentido directo.")
@@ -1418,20 +1433,7 @@ En dimensiones de sentido inverso, una puntuación alta indica una condición re
     st.latex(r"ScoreEscenario_{i,s} = \sum_d w_{d|s}\cdot ScoreDim_{i,d}")
 
     st.markdown("### Leyenda de fórmulas")
-    st.markdown(
-        """
-- **i**: zona analizada o NTA.
-- **j**: variable o subdimensión.
-- **d**: dimensión.
-- **s**: escenario.
-- **xᵢⱼ**: valor bruto observado de la variable *j* en la zona *i*.
-- **xᶜˡⁱᵖᵢⱼ**: valor de la variable *j* en la zona *i*, acotado entre los percentiles 5 y 95.
-- **P5ⱼ**: percentil 5 de la distribución de la variable *j*.
-- **P95ⱼ**: percentil 95 de la distribución de la variable *j*.
-- **wⱼ|d**: peso local de la variable *j* dentro de la dimensión *d*.
-- **w_d|s**: peso macro de la dimensión *d* dentro del escenario *s*.
-"""
-    )
+
 
 
 # =========================================================
