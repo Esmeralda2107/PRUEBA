@@ -1433,7 +1433,6 @@ En dimensiones de sentido inverso, una puntuación alta indica una condición re
 """
     )
 
-
 # =========================================================
 # TAB LIMITACIONES
 # =========================================================
