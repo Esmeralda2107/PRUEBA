@@ -1336,7 +1336,7 @@ with tab4:
 **Metodología de normalización**
 - Para la construcción del scoring, las variables se reexpresan en una escala común de 0 a 100 puntos.
 - Con el fin de reducir la influencia de valores extremos, se utilizan como límites de referencia los **percentiles 5 y 95** de la distribución de cada variable.
-- Los valores inferiores al percentil 5 se acotan al límite inferior y los superiores al percentil 95 se acotan al límite superior antes de calcular la puntuación.
+- Los valores inferiores al percentil 5 se asignan al límite inferior de la escala y los valores superiores al percentil 95 se asignan al límite superior.
 - **Sentido directo**: valores más altos reciben puntuaciones más cercanas a 100.
 - **Sentido inverso**: valores más altos reciben puntuaciones más cercanas a 0.
 
@@ -1407,11 +1407,14 @@ En dimensiones de sentido inverso, una puntuación alta indica una condición re
     )
 
     st.markdown("### Fórmulas")
-    st.latex(r"ScoreVar_{i,j} = \left(\frac{x^{*}_{i,j}-P5_j}{P95_j-P5_j}\right)\cdot 100")
+    st.latex(r"ScoreVar_{i,j} = \left(\frac{x^{clip}_{i,j}-P5_j}{P95_j-P5_j}\right)\cdot 100")
     st.markdown("Para variables de sentido directo.")
-    st.latex(r"ScoreVar_{i,j} = \left(\frac{P95_j-x^{*}_{i,j}}{P95_j-P5_j}\right)\cdot 100")
+
+    st.latex(r"ScoreVar_{i,j} = \left(\frac{P95_j-x^{clip}_{i,j}}{P95_j-P5_j}\right)\cdot 100")
     st.markdown("Para variables de sentido inverso.")
+
     st.latex(r"ScoreDim_{i,d} = \sum_j w_{j|d}\cdot ScoreVar_{i,j}")
+
     st.latex(r"ScoreEscenario_{i,s} = \sum_d w_{d|s}\cdot ScoreDim_{i,d}")
 
     st.markdown("### Leyenda de fórmulas")
@@ -1422,7 +1425,7 @@ En dimensiones de sentido inverso, una puntuación alta indica una condición re
 - **d**: dimensión.
 - **s**: escenario.
 - **xᵢⱼ**: valor bruto observado de la variable *j* en la zona *i*.
-- **x*ᵢⱼ**: valor acotado de la variable entre los percentiles 5 y 95.
+- **xᶜˡⁱᵖᵢⱼ**: valor de la variable *j* en la zona *i*, acotado entre los percentiles 5 y 95.
 - **P5ⱼ**: percentil 5 de la distribución de la variable *j*.
 - **P95ⱼ**: percentil 95 de la distribución de la variable *j*.
 - **wⱼ|d**: peso local de la variable *j* dentro de la dimensión *d*.
