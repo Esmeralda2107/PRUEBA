@@ -287,37 +287,37 @@ def score_0_100(series: pd.Series, sense: str = "direct") -> pd.Series:
 
 
 def classify_level(score):
-    if score >= 80:
+    if score >= 85:
         return "muy alta"
-    if score >= 60:
+    if score >= 70:
         return "alta"
-    if score >= 40:
+    if score >= 50:
         return "media"
-    if score >= 20:
+    if score >= 25:
         return "baja"
     return "muy baja"
 
 
 def classify_level_plural(score):
-    if score >= 80:
+    if score >= 85:
         return "muy altas"
-    if score >= 60:
+    if score >= 70:
         return "altas"
-    if score >= 40:
+    if score >= 50:
         return "medias"
-    if score >= 20:
+    if score >= 25:
         return "bajas"
     return "muy bajas"
 
 
 def score_icon(score):
-    if score >= 80:
+    if score >= 85:
         return "🟢"
-    if score >= 60:
+    if score >= 70:
         return "🟩"
-    if score >= 40:
+    if score >= 50:
         return "🟡"
-    if score >= 20:
+    if score >= 25:
         return "🟠"
     return "🔴"
 
@@ -604,42 +604,11 @@ def allocate_remaining(selected_dim, selected_value, dims, total, min_each, max_
 
     diff = total - sum(final_weights.values())
     if diff != 0:
-        adjustable = [d for d in remaining_dims if final_weights[d] + diff <= max_each and final_weights[d] + diff >= min_each]
+        adjustable = [d for d in remaining_dims if min_each <= final_weights[d] + diff <= max_each]
         if adjustable:
             final_weights[adjustable[-1]] += diff
 
     return final_weights
-
-
-def init_filter_state(scenario_scored, all_clusters):
-    defaults = {
-        "filter_score_range": (
-            float(scenario_scored["SCORE_ESCENARIO"].min()),
-            float(scenario_scored["SCORE_ESCENARIO"].max()),
-        ),
-        "filter_rent_range": (
-            float(scenario_scored["ALQ_PRECIO_PIE2_ANUAL"].min()),
-            float(scenario_scored["ALQ_PRECIO_PIE2_ANUAL"].max()),
-        ),
-        "filter_competition_range": (
-            float(scenario_scored["COMPETENCIA_DIRECTA_KM2"].min()),
-            float(scenario_scored["COMPETENCIA_DIRECTA_KM2"].max()),
-        ),
-        "filter_mobility_range": (
-            float(scenario_scored["MOVILIDAD_PROMEDIO_DIARIA"].min()),
-            float(scenario_scored["MOVILIDAD_PROMEDIO_DIARIA"].max()),
-        ),
-        "filter_zones": sorted(scenario_scored["NOMBRE_ZONA"].dropna().unique().tolist()),
-        "filter_clusters": sorted(all_clusters),
-    }
-
-    scenario_changed = st.session_state.get("active_scenario_for_filters") != scenario_name
-    if scenario_changed:
-        for k, v in defaults.items():
-            st.session_state[k] = v
-        st.session_state["active_scenario_for_filters"] = scenario_name
-
-    return defaults
 
 
 def top_vars_for_dimension(row, dim_key, n=2):
@@ -717,9 +686,9 @@ def competition_summary_text(row):
 
     dim_score = row["SCORE_DIM_COMPETENCIA"]
 
-    if dim_score >= 60:
+    if dim_score >= 70:
         intro = "Lo que indica una presión competitiva relativamente más moderada dentro del modelo."
-    elif dim_score >= 40:
+    elif dim_score >= 50:
         intro = "Lo que indica una presión competitiva intermedia dentro del modelo."
     else:
         intro = "Lo que indica una presión competitiva relativamente más exigente dentro del modelo."
@@ -730,9 +699,9 @@ def competition_summary_text(row):
 def cost_summary_text(row):
     score = row["SCORE_VAR_ALQ_PRECIO_PIE2_ANUAL"]
 
-    if score >= 60:
+    if score >= 70:
         return "Lo que indica un nivel de alquiler relativamente más bajo dentro del conjunto analizado."
-    if score >= 40:
+    if score >= 50:
         return "Lo que indica un nivel de alquiler intermedio dentro del conjunto analizado."
     return "Lo que indica un nivel de alquiler relativamente más alto dentro del conjunto analizado."
 
@@ -758,6 +727,62 @@ def dimension_summary_line(row, dim_key):
         detail = ""
 
     return f"- **{dim_label}**: puntuación {level} ({dim_score:.1f}/100). {detail}"
+
+
+def get_filter_defaults(scenario_scored, all_clusters):
+    return {
+        "filter_score_range": (
+            float(scenario_scored["SCORE_ESCENARIO"].min()),
+            float(scenario_scored["SCORE_ESCENARIO"].max()),
+        ),
+        "filter_rent_range": (
+            float(scenario_scored["ALQ_PRECIO_PIE2_ANUAL"].min()),
+            float(scenario_scored["ALQ_PRECIO_PIE2_ANUAL"].max()),
+        ),
+        "filter_competition_range": (
+            float(scenario_scored["COMPETENCIA_DIRECTA_KM2"].min()),
+            float(scenario_scored["COMPETENCIA_DIRECTA_KM2"].max()),
+        ),
+        "filter_mobility_range": (
+            float(scenario_scored["MOVILIDAD_PROMEDIO_DIARIA"].min()),
+            float(scenario_scored["MOVILIDAD_PROMEDIO_DIARIA"].max()),
+        ),
+        "filter_zones": sorted(scenario_scored["NOMBRE_ZONA"].dropna().unique().tolist()),
+        "filter_clusters": sorted(all_clusters),
+    }
+
+
+def reset_filters_callback(defaults):
+    for k, v in defaults.items():
+        st.session_state[k] = v
+
+
+def sync_filter_state_with_scenario(scenario_name, defaults):
+    key = "active_scenario_for_filters"
+    if st.session_state.get(key) != scenario_name:
+        reset_filters_callback(defaults)
+        st.session_state[key] = scenario_name
+
+
+def initialize_weight_state(state_key, defaults):
+    if state_key not in st.session_state:
+        st.session_state[state_key] = defaults.copy()
+
+
+def update_weight_group(weights_key, slider_key, selected_dim, dims, total, min_each, max_each):
+    current_weights = st.session_state[weights_key].copy()
+    selected_value = int(st.session_state[slider_key])
+
+    new_weights = allocate_remaining(
+        selected_dim=selected_dim,
+        selected_value=selected_value,
+        dims=dims,
+        total=total,
+        min_each=min_each,
+        max_each=max_each,
+        base_weights=current_weights,
+    )
+    st.session_state[weights_key] = new_weights
 
 
 # =========================================================
@@ -827,23 +852,18 @@ st.sidebar.markdown(
 st.sidebar.markdown("### Ajuste de pesos")
 st.sidebar.caption(
     "En cada escenario, las dimensiones principales concentran el 60% del peso total y las dimensiones de contexto el 40%. "
-    "Puedes modificar una dimensión dentro de cada bloque, y la aplicación reajusta automáticamente las demás para conservar esa lógica."
+    "Puedes modificar varias dimensiones de forma acumulativa dentro de cada bloque, y la aplicación reajusta automáticamente las demás para conservar esa lógica."
 )
 
 # PRINCIPALES
 st.sidebar.markdown("**Dimensiones principales**")
 main_dims = scenario["main_dims"]
 main_defaults = {d: scenario["weights"][d] for d in main_dims}
+main_weights_key = f"main_weights_{scenario_name}"
+initialize_weight_state(main_weights_key, main_defaults)
 
-requested_main_min = 21
-if len(main_dims) * requested_main_min > 60:
-    main_min = 60 // len(main_dims)
-    st.sidebar.info(
-        f"En este escenario, el mínimo técnico por dimensión principal se ajusta a {main_min}% "
-        f"porque hay {len(main_dims)} dimensiones principales dentro del bloque del 60%."
-    )
-else:
-    main_min = requested_main_min
+main_min = 20
+main_max = 60
 
 main_selected = st.sidebar.selectbox(
     "Dimensión principal a modificar",
@@ -856,41 +876,40 @@ main_lower, main_upper = compute_feasible_bounds(
     total=60,
     dims_count=len(main_dims),
     min_each=main_min,
-    max_each=60,
+    max_each=main_max,
 )
 
-main_default_value = int(main_defaults[main_selected])
-main_default_value = max(main_lower, min(main_default_value, main_upper))
+current_main_weights = st.session_state[main_weights_key]
+main_current_value = int(current_main_weights[main_selected])
+main_current_value = max(main_lower, min(main_current_value, main_upper))
 
-main_selected_value = st.sidebar.slider(
+main_slider_key = f"main_slider_{scenario_name}_{main_selected}"
+st.session_state[main_slider_key] = main_current_value
+
+st.sidebar.slider(
     f"Peso de {DIMENSIONS[main_selected]['label']} (%)",
     min_value=main_lower,
     max_value=main_upper,
-    value=main_default_value,
     step=1,
-    key=f"main_slider_{scenario_name}_{main_selected}",
+    key=main_slider_key,
+    on_change=update_weight_group,
+    args=(main_weights_key, main_slider_key, main_selected, main_dims, 60, main_min, main_max),
 )
 
-main_weights = allocate_remaining(
-    selected_dim=main_selected,
-    selected_value=main_selected_value,
-    dims=main_dims,
-    total=60,
-    min_each=main_min,
-    max_each=60,
-    base_weights=main_defaults,
-)
-
+current_main_weights = st.session_state[main_weights_key]
 for d in main_dims:
     if d != main_selected:
-        st.sidebar.info(f"{DIMENSIONS[d]['label']}: {main_weights[d]}% (ajuste automático)")
+        st.sidebar.info(f"{DIMENSIONS[d]['label']}: {current_main_weights[d]}% (ajuste automático)")
 
 # CONTEXTO
 st.sidebar.markdown("**Dimensiones de contexto**")
 context_dims = scenario["context_dims"]
 context_defaults = {d: scenario["weights"][d] for d in context_dims}
+context_weights_key = f"context_weights_{scenario_name}"
+initialize_weight_state(context_weights_key, context_defaults)
+
 context_min = 5
-context_max = 20
+context_max = 15
 
 context_selected = st.sidebar.selectbox(
     "Dimensión de contexto a modificar",
@@ -906,40 +925,44 @@ context_lower, context_upper = compute_feasible_bounds(
     max_each=context_max,
 )
 
-context_default_value = int(context_defaults[context_selected])
-context_default_value = max(context_lower, min(context_default_value, context_upper))
+current_context_weights = st.session_state[context_weights_key]
+context_current_value = int(current_context_weights[context_selected])
+context_current_value = max(context_lower, min(context_current_value, context_upper))
 
-context_selected_value = st.sidebar.slider(
+context_slider_key = f"context_slider_{scenario_name}_{context_selected}"
+st.session_state[context_slider_key] = context_current_value
+
+st.sidebar.slider(
     f"Peso de {DIMENSIONS[context_selected]['label']} (%)",
     min_value=context_lower,
     max_value=context_upper,
-    value=context_default_value,
     step=1,
-    key=f"context_slider_{scenario_name}_{context_selected}",
+    key=context_slider_key,
+    on_change=update_weight_group,
+    args=(context_weights_key, context_slider_key, context_selected, context_dims, 40, context_min, context_max),
 )
 
-context_weights = allocate_remaining(
-    selected_dim=context_selected,
-    selected_value=context_selected_value,
-    dims=context_dims,
-    total=40,
-    min_each=context_min,
-    max_each=context_max,
-    base_weights=context_defaults,
-)
-
+current_context_weights = st.session_state[context_weights_key]
 for d in context_dims:
     if d != context_selected:
-        st.sidebar.info(f"{DIMENSIONS[d]['label']}: {context_weights[d]}% (ajuste automático)")
+        st.sidebar.info(f"{DIMENSIONS[d]['label']}: {current_context_weights[d]}% (ajuste automático)")
 
-effective_weights = {**main_weights, **context_weights}
+effective_weights = {**st.session_state[main_weights_key], **st.session_state[context_weights_key]}
 scenario_scored = compute_scenario_scores(df, effective_weights)
 
 # FILTROS
 st.sidebar.markdown("### Filtros")
 
 all_cluster_options = sorted(df["CLUSTER_FILTER"].dropna().unique().tolist())
-defaults = init_filter_state(scenario_scored, all_cluster_options)
+filter_defaults = get_filter_defaults(scenario_scored, all_cluster_options)
+sync_filter_state_with_scenario(scenario_name, filter_defaults)
+
+st.sidebar.button(
+    "Restablecer filtros",
+    use_container_width=True,
+    on_click=reset_filters_callback,
+    args=(filter_defaults,),
+)
 
 score_range = st.sidebar.slider(
     "Score del escenario (0–100)",
@@ -981,11 +1004,6 @@ selected_clusters = st.sidebar.multiselect(
     key="filter_clusters",
 )
 
-if st.sidebar.button("Restablecer filtros", use_container_width=True):
-    for k, v in defaults.items():
-        st.session_state[k] = v
-    st.rerun()
-
 filtered = scenario_scored[
     scenario_scored["SCORE_ESCENARIO"].between(score_range[0], score_range[1])
     & scenario_scored["ALQ_PRECIO_PIE2_ANUAL"].between(rent_range[0], rent_range[1])
@@ -1008,8 +1026,11 @@ top_subdim_text = " · ".join([x["label"] for x in top_subdims])
 
 
 # =========================================================
-# CHIPS / RESUMEN DE FILTROS ACTIVOS
+# RESUMEN DE FILTROS ACTIVOS
 # =========================================================
+st.markdown("### Filtros activos")
+st.caption("Resumen del escenario y de las restricciones actualmente aplicadas al análisis.")
+
 excluded_clusters = [c for c in all_cluster_options if c not in selected_clusters]
 excluded_clusters_text = ", ".join(excluded_clusters) if excluded_clusters else "ninguno"
 
@@ -1316,14 +1337,14 @@ with tab4:
 **Regla macro**
 - Dimensiones principales: **60 %**
 - Dimensiones de contexto: **40 %**
-- La app permite modificar la dimensión elegida en cada bloque y reajusta automáticamente las demás para conservar la estructura.
+- La app permite modificar varias dimensiones de forma acumulativa dentro de cada bloque y reajusta automáticamente las demás para conservar la estructura.
 
 **Interpretación de categorías**
-- **Muy alta**: 80 a 100
-- **Alta**: 60 a 79.99
-- **Media**: 40 a 59.99
-- **Baja**: 20 a 39.99
-- **Muy baja**: 0 a 19.99
+- **Muy alta**: 85 a 100
+- **Alta**: 70 a 84.99
+- **Media**: 50 a 69.99
+- **Baja**: 25 a 49.99
+- **Muy baja**: 0 a 24.99
 
 Estas categorías se aplican sobre la **puntuación transformada (0–100)** y no sobre el valor bruto de la variable.  
 Por eso, una variable o dimensión con puntuación alta significa **mejor desempeño relativo dentro del modelo de scoring**, no necesariamente un valor bruto alto en el dato original.  
@@ -1331,6 +1352,16 @@ En dimensiones de sentido inverso, una puntuación alta indica una condición re
 - **Seguridad**: menor exposición relativa al riesgo.
 - **Coste**: menor nivel relativo de alquiler.
 - **Competencia**: menor presión competitiva relativa.
+
+**Significado de los símbolos en las fórmulas**
+- **i**: zona analizada o NTA.
+- **j**: variable o subdimensión.
+- **d**: dimensión.
+- **s**: escenario.
+- **xᵢⱼ**: valor bruto observado de la variable *j* en la zona *i*.
+- **min(xⱼ)** y **max(xⱼ)**: mínimo y máximo observados para la variable *j* en el conjunto de zonas.
+- **wⱼ|d**: peso local de la variable *j* dentro de la dimensión *d*.
+- **w_d|s**: peso macro de la dimensión *d* dentro del escenario *s*.
 
 **Dimensiones**
 - Censo (Demanda)
