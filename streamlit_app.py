@@ -126,17 +126,17 @@ DIMENSIONS = {
         "label": "Censo (Demanda)",
         "variables": {
             "POBLACION_KM2": {"label": "Población por km²", "weight": 30, "sense": "direct"},
-            "PORCENTAJE_HISPANOS": {"label": "Porcentaje hispanos", "weight": 20, "sense": "direct"},
+            "PORCENTAJE_HISPANOS": {"label": "Porcentaje hispanos", "weight": 15, "sense": "direct"},
             "EDAD_MEDIANA": {"label": "Edad mediana", "weight": 15, "sense": "direct"},
-            "INGRESO_MEDIANO_HOGAR": {"label": "Ingreso mediano del hogar", "weight": 20, "sense": "direct"},
+            "INGRESO_MEDIANO_HOGAR": {"label": "Ingreso mediano del hogar", "weight": 25, "sense": "direct"},
             "TAMANO_HOGAR_PROMEDIO": {"label": "Tamaño hogar promedio", "weight": 15, "sense": "direct"},
         },
     },
     "MOVILIDAD": {
         "label": "Movilidad",
         "variables": {
-            "MOVILIDAD_PROMEDIO_DIARIA": {"label": "Movilidad promedio diaria", "weight": 60, "sense": "direct"},
-            "MOV_CANTIDAD_ESTACIONES": {"label": "Cantidad de estaciones", "weight": 40, "sense": "direct"},
+            "MOVILIDAD_PROMEDIO_DIARIA": {"label": "Movilidad promedio diaria", "weight": 70, "sense": "direct"},
+            "MOV_CANTIDAD_ESTACIONES": {"label": "Cantidad de estaciones", "weight": 30, "sense": "direct"},
         },
     },
     "SEGURIDAD": {
@@ -158,8 +158,8 @@ DIMENSIONS = {
     "COMPETENCIA": {
         "label": "Competencia",
         "variables": {
-            "COMPETENCIA_DIRECTA_KM2": {"label": "Competencia directa por km²", "weight": 60, "sense": "inverse"},
-            "COMPETENCIA_INDIRECTA_KM2": {"label": "Competencia indirecta por km²", "weight": 40, "sense": "direct"},
+            "COMPETENCIA_DIRECTA_KM2": {"label": "Competencia directa por km²", "weight": 90, "sense": "inverse"},
+            "COMPETENCIA_INDIRECTA_KM2": {"label": "Competencia indirecta por km²", "weight": 10, "sense": "direct"},
         },
     },
     "COSTE": {
@@ -772,22 +772,6 @@ def initialize_weight_state(state_key, defaults):
         st.session_state[state_key] = defaults.copy()
 
 
-def update_weight_group(weights_key, slider_key, selected_dim, dims, total, min_each, max_each):
-    current_weights = st.session_state[weights_key].copy()
-    selected_value = int(st.session_state[slider_key])
-
-    new_weights = allocate_remaining(
-        selected_dim=selected_dim,
-        selected_value=selected_value,
-        dims=dims,
-        total=total,
-        min_each=min_each,
-        max_each=max_each,
-        base_weights=current_weights,
-    )
-    st.session_state[weights_key] = new_weights
-
-
 # =========================================================
 # CARGA Y PREPARACIÓN
 # =========================================================
@@ -882,22 +866,28 @@ main_lower, main_upper = compute_feasible_bounds(
     max_each=main_max,
 )
 
-current_main_weights = st.session_state[main_weights_key]
+current_main_weights = st.session_state[main_weights_key].copy()
 main_current_value = int(current_main_weights[main_selected])
 main_current_value = max(main_lower, min(main_current_value, main_upper))
 
-main_slider_key = f"main_slider_{scenario_name}_{main_selected}"
-st.session_state[main_slider_key] = main_current_value
-
-st.sidebar.slider(
+main_selected_value = st.sidebar.slider(
     f"Peso de {DIMENSIONS[main_selected]['label']} (%)",
     min_value=main_lower,
     max_value=main_upper,
+    value=main_current_value,
     step=1,
-    key=main_slider_key,
-    on_change=update_weight_group,
-    args=(main_weights_key, main_slider_key, main_selected, main_dims, 60, main_min, main_max),
 )
+
+if main_selected_value != current_main_weights[main_selected]:
+    st.session_state[main_weights_key] = allocate_remaining(
+        selected_dim=main_selected,
+        selected_value=main_selected_value,
+        dims=main_dims,
+        total=60,
+        min_each=main_min,
+        max_each=main_max,
+        base_weights=current_main_weights,
+    )
 
 current_main_weights = st.session_state[main_weights_key]
 for d in main_dims:
@@ -928,22 +918,28 @@ context_lower, context_upper = compute_feasible_bounds(
     max_each=context_max,
 )
 
-current_context_weights = st.session_state[context_weights_key]
+current_context_weights = st.session_state[context_weights_key].copy()
 context_current_value = int(current_context_weights[context_selected])
 context_current_value = max(context_lower, min(context_current_value, context_upper))
 
-context_slider_key = f"context_slider_{scenario_name}_{context_selected}"
-st.session_state[context_slider_key] = context_current_value
-
-st.sidebar.slider(
+context_selected_value = st.sidebar.slider(
     f"Peso de {DIMENSIONS[context_selected]['label']} (%)",
     min_value=context_lower,
     max_value=context_upper,
+    value=context_current_value,
     step=1,
-    key=context_slider_key,
-    on_change=update_weight_group,
-    args=(context_weights_key, context_slider_key, context_selected, context_dims, 40, context_min, context_max),
 )
+
+if context_selected_value != current_context_weights[context_selected]:
+    st.session_state[context_weights_key] = allocate_remaining(
+        selected_dim=context_selected,
+        selected_value=context_selected_value,
+        dims=context_dims,
+        total=40,
+        min_each=context_min,
+        max_each=context_max,
+        base_weights=current_context_weights,
+    )
 
 current_context_weights = st.session_state[context_weights_key]
 for d in context_dims:
@@ -960,12 +956,9 @@ all_cluster_options = sorted(df["CLUSTER_FILTER"].dropna().unique().tolist())
 filter_defaults = get_filter_defaults(scenario_scored, all_cluster_options)
 sync_filter_state_with_scenario(scenario_name, filter_defaults)
 
-st.sidebar.button(
-    "Restablecer filtros",
-    use_container_width=True,
-    on_click=reset_filters_callback,
-    args=(filter_defaults,),
-)
+if st.sidebar.button("Restablecer filtros", use_container_width=True):
+    reset_filters_callback(filter_defaults)
+    st.rerun()
 
 score_range = st.sidebar.slider(
     "Score del escenario (0–100)",
@@ -1323,9 +1316,6 @@ with tab3:
 # =========================================================
 # TAB METODOLOGÍA
 # =========================================================
-# =========================================================
-# TAB METODOLOGÍA
-# =========================================================
 with tab4:
     st.subheader("Metodología implementada")
 
@@ -1445,6 +1435,7 @@ En dimensiones de sentido inverso, una puntuación alta indica una condición re
 - **ScoreEscenarioᵢs**: puntuación de la zona *i* en el escenario *s*.
 """
     )
+
 
 # =========================================================
 # TAB LIMITACIONES
