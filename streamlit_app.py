@@ -849,7 +849,7 @@ main_defaults = {d: scenario["weights"][d] for d in main_dims}
 main_weights_key = f"main_weights_{scenario_name}"
 initialize_weight_state(main_weights_key, main_defaults)
 
-main_min = 15
+main_min = 16
 main_max = 60
 
 main_selected = st.sidebar.selectbox(
