@@ -135,8 +135,8 @@ DIMENSIONS = {
     "MOVILIDAD": {
         "label": "Movilidad",
         "variables": {
-            "MOVILIDAD_PROMEDIO_DIARIA": {"label": "Movilidad promedio diaria", "weight": 70, "sense": "direct"},
-            "MOV_CANTIDAD_ESTACIONES": {"label": "Cantidad de estaciones", "weight": 30, "sense": "direct"},
+            "MOVILIDAD_PROMEDIO_DIARIA": {"label": "Movilidad promedio diaria", "weight": 75, "sense": "direct"},
+            "MOV_CANTIDAD_ESTACIONES": {"label": "Cantidad de estaciones", "weight": 25, "sense": "direct"},
         },
     },
     "SEGURIDAD": {
@@ -691,7 +691,7 @@ def competition_summary_text(row):
 
     if dim_score >= 70:
         intro = "Lo que indica una presión competitiva relativamente más moderada dentro del modelo."
-    elif dim_score >= 50:
+    elif dim_score >= 40:
         intro = "Lo que indica una presión competitiva intermedia dentro del modelo."
     else:
         intro = "Lo que indica una presión competitiva relativamente más exigente dentro del modelo."
@@ -704,7 +704,7 @@ def cost_summary_text(row):
 
     if score >= 70:
         return "Lo que indica un nivel de alquiler relativamente más bajo dentro del conjunto analizado."
-    if score >= 50:
+    if score >= 40:
         return "Lo que indica un nivel de alquiler intermedio dentro del conjunto analizado."
     return "Lo que indica un nivel de alquiler relativamente más alto dentro del conjunto analizado."
 
@@ -849,7 +849,7 @@ main_defaults = {d: scenario["weights"][d] for d in main_dims}
 main_weights_key = f"main_weights_{scenario_name}"
 initialize_weight_state(main_weights_key, main_defaults)
 
-main_min = 16
+main_min = 15
 main_max = 60
 
 main_selected = st.sidebar.selectbox(
