@@ -135,8 +135,8 @@ DIMENSIONS = {
     "MOVILIDAD": {
         "label": "Movilidad",
         "variables": {
-            "MOVILIDAD_PROMEDIO_DIARIA": {"label": "Movilidad promedio diaria", "weight": 75, "sense": "direct"},
-            "MOV_CANTIDAD_ESTACIONES": {"label": "Cantidad de estaciones", "weight": 25, "sense": "direct"},
+            "MOVILIDAD_PROMEDIO_DIARIA": {"label": "Movilidad promedio diaria", "weight": 70, "sense": "direct"},
+            "MOV_CANTIDAD_ESTACIONES": {"label": "Cantidad de estaciones", "weight": 30, "sense": "direct"},
         },
     },
     "SEGURIDAD": {
@@ -201,8 +201,8 @@ SCENARIOS = {
         "description": "Enfatiza los factores que inciden con mayor fuerza en la estabilidad operativa y económica de la implantación, así como en la saturación competitiva del entorno.",
         "weights": {
             "SEGURIDAD": 20,
-            "COSTE": 20,
-            "COMPETENCIA": 20,
+            "COSTE": 25,
+            "COMPETENCIA": 15,
             "DEMANDA": 15,
             "MOVILIDAD": 10,
             "PUNTOS_INTERES": 15,
@@ -691,7 +691,7 @@ def competition_summary_text(row):
 
     if dim_score >= 70:
         intro = "Lo que indica una presión competitiva relativamente más moderada dentro del modelo."
-    elif dim_score >= 40:
+    elif dim_score >= 50:
         intro = "Lo que indica una presión competitiva intermedia dentro del modelo."
     else:
         intro = "Lo que indica una presión competitiva relativamente más exigente dentro del modelo."
@@ -704,7 +704,7 @@ def cost_summary_text(row):
 
     if score >= 70:
         return "Lo que indica un nivel de alquiler relativamente más bajo dentro del conjunto analizado."
-    if score >= 40:
+    if score >= 50:
         return "Lo que indica un nivel de alquiler intermedio dentro del conjunto analizado."
     return "Lo que indica un nivel de alquiler relativamente más alto dentro del conjunto analizado."
 
@@ -849,7 +849,7 @@ main_defaults = {d: scenario["weights"][d] for d in main_dims}
 main_weights_key = f"main_weights_{scenario_name}"
 initialize_weight_state(main_weights_key, main_defaults)
 
-main_min = 20
+main_min = 16
 main_max = 60
 
 main_selected = st.sidebar.selectbox(
@@ -870,46 +870,24 @@ current_main_weights = st.session_state[main_weights_key].copy()
 main_current_value = int(current_main_weights[main_selected])
 main_current_value = max(main_lower, min(main_current_value, main_upper))
 
-main_weights_need_normalization = (
-    sum(int(v) for v in current_main_weights.values()) != 60
-    or any(int(v) < main_min or int(v) > main_max for v in current_main_weights.values())
+main_selected_value = st.sidebar.slider(
+    f"Peso de {DIMENSIONS[main_selected]['label']} (%)",
+    min_value=main_lower,
+    max_value=main_upper,
+    value=main_current_value,
+    step=1,
 )
 
-if main_lower == main_upper:
-    main_selected_value = int(main_lower)
-    st.sidebar.caption(
-        f"Peso fijo para {DIMENSIONS[main_selected]['label']}: {main_selected_value}%"
+if main_selected_value != current_main_weights[main_selected]:
+    st.session_state[main_weights_key] = allocate_remaining(
+        selected_dim=main_selected,
+        selected_value=main_selected_value,
+        dims=main_dims,
+        total=60,
+        min_each=main_min,
+        max_each=main_max,
+        base_weights=current_main_weights,
     )
-
-    if main_weights_need_normalization or main_selected_value != int(current_main_weights[main_selected]):
-        st.session_state[main_weights_key] = allocate_remaining(
-            selected_dim=main_selected,
-            selected_value=main_selected_value,
-            dims=main_dims,
-            total=60,
-            min_each=main_min,
-            max_each=main_max,
-            base_weights=current_main_weights,
-        )
-else:
-    main_selected_value = st.sidebar.slider(
-        f"Peso de {DIMENSIONS[main_selected]['label']} (%)",
-        min_value=int(main_lower),
-        max_value=int(main_upper),
-        value=int(main_current_value),
-        step=1,
-    )
-
-    if main_selected_value != current_main_weights[main_selected] or main_weights_need_normalization:
-        st.session_state[main_weights_key] = allocate_remaining(
-            selected_dim=main_selected,
-            selected_value=main_selected_value,
-            dims=main_dims,
-            total=60,
-            min_each=main_min,
-            max_each=main_max,
-            base_weights=current_main_weights,
-        )
 
 current_main_weights = st.session_state[main_weights_key]
 for d in main_dims:
